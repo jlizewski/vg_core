@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package vg;
+
+import "google/protobuf/timestamp.proto";
+
+// Global pose of the body from ARCore Geospatial / ARKit geo tracking,
+// published on /geo_pose.
+message GeoPose {
+  google.protobuf.Timestamp timestamp = 1;
+
+  // WGS84 degrees, altitude in meters above the ellipsoid.
+  double latitude = 2;
+  double longitude = 3;
+  double altitude = 4;
+
+  // Orientation of body in East-North-Up, as a unit quaternion.
+  double qx = 5;
+  double qy = 6;
+  double qz = 7;
+  double qw = 8;
+
+  // 1-sigma accuracies as reported by the platform.
+  double horizontal_accuracy_m = 9;
+  double vertical_accuracy_m = 10;
+  double heading_accuracy_rad = 11;
+}

@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package vg;
+
+import "google/protobuf/timestamp.proto";
+
+// One per capture session, written first on /vg/session.
+message SessionInfo {
+  // Capture format version, "MAJOR.MINOR". Same as the vg_capture metadata record.
+  string format_version = 1;
+
+  // Producing software and version, e.g. "vg_android 0.3.0".
+  string producer = 2;
+
+  // Source platform: "arcore", "arkit", "rig", ...
+  string platform = 3;
+
+  // Hardware model, e.g. "Pixel 8 Pro".
+  string device_model = 4;
+
+  // Session start on the session clock.
+  google.protobuf.Timestamp start_time = 5;
+
+  // UTC time = session clock time + utc_offset_ns.
+  int64 utc_offset_ns = 6;
+
+  // Free-form notes (garden name, operator, ...).
+  string notes = 7;
+}
