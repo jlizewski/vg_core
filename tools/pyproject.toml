@@ -12,6 +12,7 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
+schemas = ["grpcio-tools>=1.60"]
 
 [project.scripts]
 vg = "vg_tools.cli:main"

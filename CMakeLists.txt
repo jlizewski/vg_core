@@ -16,6 +16,8 @@ else()
 endif()
 option(VG_CORE_BUILD_TESTS "Build vg_core unit tests" ${_vg_core_tests_default})
 option(VG_CORE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(VG_CORE_BUILD_IO "Build vg_core_io (capture session recording and playback)" ON)
+option(VG_CORE_BUILD_APPS "Build command-line apps such as vg_replay" ${_vg_core_tests_default})
 
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -40,6 +42,31 @@ configure_file(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/version_config.hpp.in
   ${CMAKE_CURRENT_BINARY_DIR}/generated/vg_core/version_config.hpp)
 target_include_directories(vg_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated)
+
+# Capture session I/O (MCAP + protobuf). Kept out of vg_core so the mapping
+# library has no file-format dependencies.
+if(VG_CORE_BUILD_IO)
+  include(cmake/IoDependencies.cmake)
+  add_library(vg_core_io
+    src/io/mcap_impl.cpp
+    src/io/messages.cpp
+    src/io/protobuf.cpp
+    src/io/schema_descriptors.cpp
+    src/io/session.cpp
+    src/io/session_player.cpp
+    src/io/session_reader.cpp
+    src/io/session_writer.cpp)
+  add_library(vg_core::vg_core_io ALIAS vg_core_io)
+  target_link_libraries(vg_core_io PUBLIC vg_core PRIVATE vg_mcap)
+  set_target_properties(vg_core_io PROPERTIES CXX_EXTENSIONS OFF)
+  vg_core_set_warnings(vg_core_io)
+
+  if(VG_CORE_BUILD_APPS)
+    add_executable(vg_replay apps/vg_replay.cpp)
+    target_link_libraries(vg_replay PRIVATE vg_core_io)
+    vg_core_set_warnings(vg_replay)
+  endif()
+endif()
 
 if(VG_CORE_BUILD_TESTS)
   enable_testing()

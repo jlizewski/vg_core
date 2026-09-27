@@ -23,3 +23,12 @@ target_link_libraries(vg_core_tests PRIVATE vg_core::vg_core GTest::gtest_main)
 vg_core_set_warnings(vg_core_tests)
 
 gtest_discover_tests(vg_core_tests)
+
+if(VG_CORE_BUILD_IO)
+  add_executable(vg_core_io_tests
+    protobuf_test.cpp
+    session_io_test.cpp)
+  target_link_libraries(vg_core_io_tests PRIVATE vg_core::vg_core_io GTest::gtest_main)
+  vg_core_set_warnings(vg_core_io_tests)
+  gtest_discover_tests(vg_core_io_tests)
+endif()
