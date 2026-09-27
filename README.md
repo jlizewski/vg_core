@@ -18,6 +18,8 @@ on any platform.
 | `tests/` | C++ unit tests (GoogleTest) |
 | `cmake/` | CMake helper modules |
 | `tools/` | Python development tools (`vg` CLI) |
+| `docs/` | Design docs, including the [capture format](docs/capture-format.md) |
+| `schemas/` | Protobuf schemas for vg-specific capture messages |
 
 ## Building (C++17, CMake ≥ 3.20)
 
