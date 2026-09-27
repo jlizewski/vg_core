@@ -6,7 +6,6 @@
 #include <vector>
 
 #include "test_scene.hpp"
-#include "vg_core/height_map.hpp"
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
 #include "vg_core/io/session_writer.hpp"
@@ -308,10 +307,10 @@ TEST(SessionMapper, ReplayedSessionBuildsHeightMap) {
     writer.write(stale);
   }
 
-  vg::TsdfConfig config;
-  config.max_depth = 2.5;
-  vg::TsdfVolume volume(config);
-  vg::io::SessionMapper mapper(volume);
+  vg::MapBuilderConfig config;
+  config.tsdf.max_depth = 2.5;
+  vg::MapBuilder builder(config);
+  vg::io::SessionMapper mapper(builder);
   vg::io::SessionReader reader(file.path());
   vg::io::PlaybackOptions options;
   options.rate = 0.0;
@@ -322,12 +321,13 @@ TEST(SessionMapper, ReplayedSessionBuildsHeightMap) {
         return true;
       },
       options);
-  mapper.flush();
+  builder.flush();
 
-  EXPECT_EQ(mapper.stats().integrated, 3u);
-  EXPECT_EQ(mapper.stats().skipped_no_pose, 1u);
+  EXPECT_EQ(builder.stats().integrated, 3u);
+  EXPECT_EQ(builder.stats().skipped_no_pose, 1u);
 
-  const auto map = vg::make_height_map(volume.extract_surface_points(), 0.05);
+  builder.update_height_map();
+  const auto map = builder.height_map();
   auto height_at = [&map](double x, double y) {
     const int cx = static_cast<int>(std::floor((x - map.origin.x()) / map.cell_size));
     const int cy = static_cast<int>(std::floor((y - map.origin.y()) / map.cell_size));

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "vg_core/sensor_data.hpp"
@@ -50,6 +51,19 @@ class TsdfVolume {
   // centers. Roughly one point per surface voxel.
   std::vector<Eigen::Vector3d> extract_surface_points() const;
 
+  // The surface points belonging to one block (those between a voxel of the
+  // block and its +x, +y or +z neighbor). Empty if the block doesn't exist.
+  std::vector<Eigen::Vector3d> extract_surface_points(const Eigen::Vector3i& block_index) const;
+
+  // Blocks whose surface points may have changed since the last call, for
+  // incremental consumers such as a live view. Includes the -x/-y/-z
+  // neighbors of updated blocks, since their boundary points read into them.
+  std::vector<Eigen::Vector3i> take_changed_blocks();
+
+  // Edge length of a block, in meters. Block (i, j, k) spans
+  // [i, j, k] * block_edge() to [i + 1, j + 1, k + 1] * block_edge().
+  double block_edge() const { return config_.voxel_size * kBlockSize; }
+
   std::size_t num_blocks() const { return blocks_.size(); }
 
  private:
@@ -68,9 +82,12 @@ class TsdfVolume {
   const Voxel* find_voxel(const Eigen::Vector3i& voxel) const;
   void integrate_block(const Eigen::Vector3i& block_index, Block& block, const DepthFrame& frame,
                        const Eigen::Isometry3d& camera_from_world);
+  void append_surface_points(const Eigen::Vector3i& block_index, const Block& block,
+                             std::vector<Eigen::Vector3d>& points) const;
 
   TsdfConfig config_;
   std::unordered_map<Eigen::Vector3i, Block, IndexHash> blocks_;
+  std::unordered_set<Eigen::Vector3i, IndexHash> changed_;
 };
 
 }  // namespace vg

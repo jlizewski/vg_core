@@ -90,6 +90,23 @@ TEST(TsdfVolume, SkipsInvalidAndLowConfidenceDepth) {
   EXPECT_EQ(no_depth.num_blocks(), 0u);
 }
 
+TEST(TsdfVolume, ReportsChangedBlocksOnce) {
+  vg::TsdfVolume volume;
+  volume.integrate(render_depth(Scene{}, kTopDown), kTopDown);
+
+  const auto changed = volume.take_changed_blocks();
+  EXPECT_EQ(changed.size(), volume.num_blocks());
+  EXPECT_TRUE(volume.take_changed_blocks().empty());
+
+  // Per-block points add up to the full extraction.
+  std::size_t total = 0;
+  for (const auto& block : changed) {
+    total += volume.extract_surface_points(block).size();
+  }
+  EXPECT_EQ(total, volume.extract_surface_points().size());
+  EXPECT_TRUE(volume.extract_surface_points(Eigen::Vector3i(1000, 1000, 1000)).empty());
+}
+
 TEST(HeightMap, KeepsHighestPointPerCell) {
   const auto map =
       vg::make_height_map({{0.05, 0.05, 1.0}, {0.07, 0.02, 2.0}, {0.25, 0.05, 0.5}}, 0.1);

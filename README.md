@@ -35,6 +35,24 @@ Eigen 3.4 and GoogleTest are used from the system if found, otherwise fetched at
 configure time. `vg_core_io` also fetches zstd and the MCAP C++ library; turn it
 off with `-DVG_CORE_BUILD_IO=OFF` to build only the mapping library.
 
+## Live mapping
+
+`vg::MapBuilder` builds the map as data arrives, on device or from a replay:
+
+```cpp
+vg::MapBuilder builder;
+builder.set_camera_extrinsics("rgb", body_from_camera);  // once
+builder.add_pose(pose);                                  // every tracker pose
+builder.add_depth("rgb", depth_frame);                   // every depth frame
+// A few times a second, e.g. on the mapping thread before handing off to the UI:
+for (const vg::HeightCell& cell : builder.update_height_map()) {
+  redraw(cell.x, cell.y, cell.height);  // NaN height: cell cleared
+}
+```
+
+`update_height_map()` only re-reads the parts of the map that changed since
+the last call. `builder.height_map()` gives the whole map, e.g. to export.
+
 ## Replaying a recording
 
 `vg_replay` rebuilds a map from a capture session
@@ -42,14 +60,14 @@ off with `-DVG_CORE_BUILD_IO=OFF` to build only the mapping library.
 
 ```sh
 build/debug/vg_replay session.mcap garden.asc            # as fast as possible
-build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed
+build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
 build/debug/vg_replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
 ```
 
 The same session opens in [Foxglove](https://foxglove.dev) for inspection.
 In code, `vg::io::SessionReader` plus `vg::io::play()` give the same playback
 with a callback per message, and `vg::io::SessionMapper` feeds it into a
-`vg::TsdfVolume`.
+`vg::MapBuilder`.
 
 To consume vg_core from another CMake project:
 
