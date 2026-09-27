@@ -53,3 +53,7 @@ vg test             # build and run C++ tests
 vg format [--check] # clang-format C++ sources
 pytest tools        # test the tools themselves
 ```
+
+## License
+
+vg_core is licensed under the [Apache License 2.0](LICENSE).
