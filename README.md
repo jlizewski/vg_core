@@ -29,7 +29,8 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-GoogleTest is used from the system if found, otherwise fetched at configure time.
+Eigen 3.4 and GoogleTest are used from the system if found, otherwise fetched at
+configure time.
 
 To consume vg_core from another CMake project:
 
@@ -52,3 +53,7 @@ vg test             # build and run C++ tests
 vg format [--check] # clang-format C++ sources
 pytest tools        # test the tools themselves
 ```
+
+## License
+
+vg_core is licensed under the [Apache License 2.0](LICENSE).
