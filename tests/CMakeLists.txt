@@ -16,6 +16,7 @@ endif()
 include(GoogleTest)
 
 add_executable(vg_core_tests
+  height_map_io_test.cpp
   tsdf_volume_test.cpp
   version_test.cpp)
 target_link_libraries(vg_core_tests PRIVATE vg_core::vg_core GTest::gtest_main)
