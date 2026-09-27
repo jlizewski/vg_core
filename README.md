@@ -29,7 +29,8 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-GoogleTest is used from the system if found, otherwise fetched at configure time.
+Eigen 3.4 and GoogleTest are used from the system if found, otherwise fetched at
+configure time.
 
 To consume vg_core from another CMake project:
 

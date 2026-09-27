@@ -18,8 +18,11 @@ option(VG_CORE_BUILD_TESTS "Build vg_core unit tests" ${_vg_core_tests_default})
 option(VG_CORE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 include(cmake/CompilerWarnings.cmake)
+include(cmake/Dependencies.cmake)
 
 add_library(vg_core
+  src/height_map.cpp
+  src/tsdf_volume.cpp
   src/version.cpp)
 add_library(vg_core::vg_core ALIAS vg_core)
 
@@ -29,6 +32,7 @@ target_include_directories(vg_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
+target_link_libraries(vg_core PUBLIC Eigen3::Eigen)
 vg_core_set_warnings(vg_core)
 
 configure_file(
