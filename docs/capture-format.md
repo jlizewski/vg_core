@@ -14,6 +14,25 @@ A session has two layers:
   (ARCore, ARKit, a stereo camera SDK). When present, vg_core uses them instead
   of computing its own.
 
+## Where this runs
+
+The map builder has to run on device (Android, iOS) as well as on desktop
+(Windows, Linux, macOS), so the file format is kept out of the mapping code:
+
+- **`vg_core`** is the map builder. Its API takes plain C++ structs (image,
+  IMU sample, GPS fix, depth, pose). It has no MCAP or protobuf dependency.
+- **`vg_core_io`** is an optional module that reads and writes capture
+  sessions (this format) and converts them to and from those structs. It uses
+  the header-only [MCAP C++ library](https://github.com/foxglove/mcap/tree/main/cpp)
+  (zstd, lz4) and the protobuf lite runtime, all of which build for the
+  Android NDK and iOS.
+
+On a phone, the app can feed live sensor data straight into `vg_core`, or
+record a session through `vg_core_io`'s writer (via JNI / Objective-C++), so
+Android and iOS share one writer instead of each implementing the format. On a
+desktop, recorded sessions are replayed through `vg_core_io` for development
+and inspected in Foxglove Studio, which is a viewer only and not a dependency.
+
 ## Container
 
 - One `.mcap` file per session, extension `.vgcap.mcap` recommended.
