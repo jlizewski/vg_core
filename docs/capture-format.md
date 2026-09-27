@@ -27,6 +27,11 @@ The map builder has to run on device (Android, iOS) as well as on desktop
   (zstd, lz4) and the protobuf lite runtime, all of which build for the
   Android NDK and iOS.
 
+vg_core_io provides `SessionWriter`, `SessionReader`, a `play()` function that
+replays a session at its recorded speed (or scaled, or as fast as possible),
+and the `vg_replay` command-line tool that rebuilds a height map from a
+recording.
+
 On a phone, the app can feed live sensor data straight into `vg_core`, or
 record a session through `vg_core_io`'s writer (via JNI / Objective-C++), so
 Android and iOS share one writer instead of each implementing the format. On a
@@ -40,7 +45,8 @@ and inspected in Foxglove Studio, which is a viewer only and not a dependency.
   [Foxglove schema](https://docs.foxglove.dev/docs/visualization/message-schemas/introduction)
   fits, it is used unchanged so sessions open in Foxglove Studio with no plugins.
   vg-specific messages live in [`schemas/vg/`](../schemas/vg).
-- Chunk compression: `zstd` (default) or `lz4`.
+- Chunk compression: `zstd`. (vg_core_io is built without LZ4, so LZ4-compressed
+  files from other tools can't be read yet.)
 - The file carries an MCAP metadata record named `vg_capture` with keys
   `format_version` (e.g. `0.1`) and `producer` (e.g. `vg_android 0.3.0`).
 
@@ -94,7 +100,7 @@ producers convert to the conventions above before writing.
 | Topic | Schema | Notes |
 | --- | --- | --- |
 | `/cam/<name>/depth` | `foxglove.RawImage`, encoding `16UC1` (millimeters) or `32FC1` (meters) | Registered to `cam/<name>`. 0 / NaN means no data. |
-| `/cam/<name>/depth/calibration` | `foxglove.CameraCalibration` | Only if depth resolution differs from the image (usual on ARCore/ARKit). |
+| `/cam/<name>/depth/calibration` | `foxglove.CameraCalibration` | Intrinsics of the depth image. Needed when they differ from the color image (usual on ARCore/ARKit); vg_core_io always writes it, again whenever it changes. |
 | `/cam/<name>/depth/confidence` | `foxglove.RawImage`, encoding `mono8` | 0 = none, 255 = full. ARKit's low/medium/high map to 0/128/255. |
 | `/pose` | `foxglove.PoseInFrame` | Pose of `body` in `world` from the platform tracker (VIO). |
 | `/pose/status` | `vg.TrackingStatus` | Tracker state, so vg_core can drop poses taken while tracking was limited or lost. |

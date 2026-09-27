@@ -26,3 +26,8 @@ def test_parser_defaults_to_debug_preset():
     args = cli.build_parser().parse_args(["build"])
     assert args.preset == "debug"
     assert args.func is cli.cmd_build
+
+
+def test_parser_has_schemas_command():
+    args = cli.build_parser().parse_args(["schemas"])
+    assert args.func is cli.cmd_schemas

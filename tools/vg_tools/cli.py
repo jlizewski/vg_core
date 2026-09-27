@@ -5,6 +5,7 @@ Run from anywhere inside the repository, e.g.:
     vg build            # configure (if needed) and build the debug preset
     vg test             # build, then run the C++ unit tests
     vg format --check   # verify clang-format on C++ sources
+    vg schemas          # regenerate embedded MCAP schema descriptors
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-CPP_DIRS = ("include", "src", "tests")
+CPP_DIRS = ("apps", "include", "src", "tests")
 CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 
 
@@ -75,6 +76,12 @@ def cmd_format(args: argparse.Namespace, root: Path) -> int:
     return run([clang_format, *mode, *files], root)
 
 
+def cmd_schemas(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import schemas
+
+    return schemas.generate(root)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vg", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -91,6 +98,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("format", help="run clang-format on C++ sources")
     p.add_argument("--check", action="store_true", help="report issues without editing")
     p.set_defaults(func=cmd_format)
+
+    p = sub.add_parser("schemas", help="regenerate embedded MCAP schema descriptors")
+    p.set_defaults(func=cmd_schemas)
 
     return parser
 

@@ -1,0 +1,171 @@
+#include "vg_core/io/session_reader.hpp"
+
+#include <map>
+#include <mcap/reader.hpp>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+#include "messages.hpp"
+
+namespace vg::io {
+namespace {
+
+// Depth confidence, kept internal until it's attached to its depth image.
+struct Confidence {
+  std::string camera;
+  Timestamp timestamp = 0;
+  std::vector<std::uint8_t> values;
+};
+
+using Decoded = std::variant<SessionMessage, Confidence>;
+
+bool starts_with(std::string_view s, std::string_view prefix) {
+  return s.substr(0, prefix.size()) == prefix;
+}
+
+}  // namespace
+
+struct SessionReader::Impl {
+  mcap::McapReader reader;
+  std::optional<mcap::LinearMessageView> view;
+  std::optional<mcap::LinearMessageView::Iterator> it;
+  std::optional<Decoded> pending;
+  std::map<std::string, CameraIntrinsics> camera_calibrations;
+  std::map<std::string, CameraIntrinsics> depth_calibrations;
+
+  // Next decoded message from the file, or nullopt at the end.
+  std::optional<Decoded> next_raw() {
+    while (*it != view->end()) {
+      const mcap::MessageView& mv = **it;
+      std::optional<Decoded> decoded = decode(
+          mv.channel->topic, {reinterpret_cast<const char*>(mv.message.data), mv.message.dataSize});
+      ++*it;
+      if (decoded) {
+        return decoded;
+      }
+    }
+    return std::nullopt;
+  }
+
+  std::optional<Decoded> decode(const std::string& topic, std::string_view data) {
+    using namespace detail;
+    if (topic == "/vg/session") {
+      return SessionMessage{decode_session_info(data)};
+    }
+    if (topic == "/tf_static") {
+      return SessionMessage{decode_static_transforms(data)};
+    }
+    if (topic == "/pose") {
+      return SessionMessage{decode_pose(data)};
+    }
+    if (topic == "/pose/status") {
+      return SessionMessage{decode_tracking_status(data)};
+    }
+    if (topic == "/imu") {
+      return SessionMessage{decode_imu(data)};
+    }
+    if (topic == "/gps") {
+      return SessionMessage{decode_gps(data)};
+    }
+    if (!starts_with(topic, "/cam/")) {
+      return std::nullopt;  // Unknown topic.
+    }
+    const std::string_view rest = std::string_view(topic).substr(5);
+    const std::string camera(rest.substr(0, rest.find('/')));
+    const std::string_view kind = rest.substr(std::min(rest.size(), camera.size() + 1));
+
+    if (kind == "calibration") {
+      CameraCalibration c;
+      c.camera = camera;
+      c.intrinsics = decode_calibration(data);
+      camera_calibrations[camera] = c.intrinsics;
+      return SessionMessage{std::move(c)};
+    }
+    if (kind == "image") {
+      CameraImage image = decode_image(data);
+      image.camera = camera;
+      return SessionMessage{std::move(image)};
+    }
+    if (kind == "depth/calibration") {
+      depth_calibrations[camera] = decode_calibration(data);
+      return std::nullopt;  // Attached to the depth images that follow.
+    }
+    if (kind == "depth") {
+      const RawImage raw = decode_raw_image(data);
+      DepthImage depth;
+      depth.camera = camera;
+      depth.frame.timestamp = raw.timestamp;
+      depth.frame.intrinsics = depth_intrinsics(camera, raw);
+      depth.frame.depth = depth_from_raw(raw);
+      return SessionMessage{std::move(depth)};
+    }
+    if (kind == "depth/confidence") {
+      const RawImage raw = decode_raw_image(data);
+      return Confidence{camera, raw.timestamp, confidence_from_raw(raw)};
+    }
+    return std::nullopt;
+  }
+
+  CameraIntrinsics depth_intrinsics(const std::string& camera, const detail::RawImage& raw) {
+    for (const auto* calibrations : {&depth_calibrations, &camera_calibrations}) {
+      auto it_cal = calibrations->find(camera);
+      if (it_cal != calibrations->end() && it_cal->second.width == raw.width &&
+          it_cal->second.height == raw.height) {
+        return it_cal->second;
+      }
+    }
+    throw std::runtime_error("session: no calibration matching depth image size for camera " +
+                             camera);
+  }
+};
+
+SessionReader::SessionReader(const std::filesystem::path& path) : impl_(std::make_unique<Impl>()) {
+  const mcap::Status status = impl_->reader.open(path.string());
+  if (!status.ok()) {
+    throw std::runtime_error("session: cannot open " + path.string() + ": " + status.message);
+  }
+  mcap::ReadMessageOptions options;
+  options.readOrder = mcap::ReadMessageOptions::ReadOrder::LogTimeOrder;
+  // Problems (e.g. a file truncated by a crash mid-recording) end reading at
+  // the last good message rather than failing the whole session.
+  impl_->view.emplace(impl_->reader.readMessages([](const mcap::Status&) {}, options));
+  impl_->it.emplace(impl_->view->begin());
+}
+
+SessionReader::~SessionReader() = default;
+
+std::optional<SessionMessage> SessionReader::next() {
+  Impl& d = *impl_;
+  for (;;) {
+    std::optional<Decoded> m;
+    if (d.pending) {
+      m = std::move(d.pending);
+      d.pending.reset();
+    } else {
+      m = d.next_raw();
+    }
+    if (!m) {
+      return std::nullopt;
+    }
+    if (std::holds_alternative<Confidence>(*m)) {
+      continue;  // Confidence without a matching depth image.
+    }
+    SessionMessage message = std::get<SessionMessage>(std::move(*m));
+    if (auto* depth = std::get_if<DepthImage>(&message)) {
+      // The writer puts confidence right after its depth image.
+      d.pending = d.next_raw();
+      if (d.pending) {
+        if (auto* c = std::get_if<Confidence>(&*d.pending);
+            c != nullptr && c->camera == depth->camera && c->timestamp == depth->frame.timestamp &&
+            c->values.size() == depth->frame.depth.size()) {
+          depth->frame.confidence = std::move(c->values);
+          d.pending.reset();
+        }
+      }
+    }
+    return message;
+  }
+}
+
+}  // namespace vg::io
