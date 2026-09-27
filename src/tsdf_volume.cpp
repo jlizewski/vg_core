@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <unordered_set>
 
 namespace vg {
 namespace {
@@ -82,6 +81,7 @@ void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& wor
   const Eigen::Isometry3d camera_from_world = world_from_camera.inverse();
   for (const Eigen::Vector3i& index : touched) {
     integrate_block(index, blocks_[index], frame, camera_from_world);
+    changed_.insert(index);
   }
 }
 
@@ -137,33 +137,61 @@ std::optional<double> TsdfVolume::distance_at(const Eigen::Vector3d& point) cons
 std::vector<Eigen::Vector3d> TsdfVolume::extract_surface_points() const {
   std::vector<Eigen::Vector3d> points;
   for (const auto& [block_index, block] : blocks_) {
-    const Eigen::Vector3i origin = block_index * kBlockSize;
-    for (int z = 0; z < kBlockSize; ++z) {
-      for (int y = 0; y < kBlockSize; ++y) {
-        for (int x = 0; x < kBlockSize; ++x) {
-          const Eigen::Vector3i local(x, y, z);
-          const Voxel& a = block[linear_index(local)];
-          // Saturated values sit at the edge of the truncation band, where a
-          // sign flip is an occlusion boundary rather than a surface.
-          if (a.weight <= 0.0f || std::abs(a.tsdf) >= 1.0f) {
+    append_surface_points(block_index, block, points);
+  }
+  return points;
+}
+
+std::vector<Eigen::Vector3d> TsdfVolume::extract_surface_points(
+    const Eigen::Vector3i& block_index) const {
+  std::vector<Eigen::Vector3d> points;
+  if (const auto it = blocks_.find(block_index); it != blocks_.end()) {
+    append_surface_points(block_index, it->second, points);
+  }
+  return points;
+}
+
+std::vector<Eigen::Vector3i> TsdfVolume::take_changed_blocks() {
+  std::unordered_set<Eigen::Vector3i, IndexHash> result = changed_;
+  for (const Eigen::Vector3i& index : changed_) {
+    for (int axis = 0; axis < 3; ++axis) {
+      const Eigen::Vector3i neighbor = index - Eigen::Vector3i::Unit(axis);
+      if (blocks_.count(neighbor) != 0) {
+        result.insert(neighbor);
+      }
+    }
+  }
+  changed_.clear();
+  return {result.begin(), result.end()};
+}
+
+void TsdfVolume::append_surface_points(const Eigen::Vector3i& block_index, const Block& block,
+                                       std::vector<Eigen::Vector3d>& points) const {
+  const Eigen::Vector3i origin = block_index * kBlockSize;
+  for (int z = 0; z < kBlockSize; ++z) {
+    for (int y = 0; y < kBlockSize; ++y) {
+      for (int x = 0; x < kBlockSize; ++x) {
+        const Eigen::Vector3i local(x, y, z);
+        const Voxel& a = block[linear_index(local)];
+        // Saturated values sit at the edge of the truncation band, where a
+        // sign flip is an occlusion boundary rather than a surface.
+        if (a.weight <= 0.0f || std::abs(a.tsdf) >= 1.0f) {
+          continue;
+        }
+        for (int axis = 0; axis < 3; ++axis) {
+          const Eigen::Vector3i neighbor = origin + local + Eigen::Vector3i::Unit(axis);
+          const Voxel* b = find_voxel(neighbor);
+          if (b == nullptr || b->weight <= 0.0f || std::abs(b->tsdf) >= 1.0f ||
+              (a.tsdf >= 0.0f) == (b->tsdf >= 0.0f)) {
             continue;
           }
-          for (int axis = 0; axis < 3; ++axis) {
-            const Eigen::Vector3i neighbor = origin + local + Eigen::Vector3i::Unit(axis);
-            const Voxel* b = find_voxel(neighbor);
-            if (b == nullptr || b->weight <= 0.0f || std::abs(b->tsdf) >= 1.0f ||
-                (a.tsdf >= 0.0f) == (b->tsdf >= 0.0f)) {
-              continue;
-            }
-            const double t = static_cast<double>(a.tsdf / (a.tsdf - b->tsdf));
-            points.push_back(voxel_center(origin + local) +
-                             t * config_.voxel_size * Eigen::Vector3d::Unit(axis));
-          }
+          const double t = static_cast<double>(a.tsdf / (a.tsdf - b->tsdf));
+          points.push_back(voxel_center(origin + local) +
+                           t * config_.voxel_size * Eigen::Vector3d::Unit(axis));
         }
       }
     }
   }
-  return points;
 }
 
 }  // namespace vg
