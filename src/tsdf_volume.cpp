@@ -155,14 +155,63 @@ std::vector<Eigen::Vector3i> TsdfVolume::take_changed_blocks() {
   std::unordered_set<Eigen::Vector3i, IndexHash> result = changed_;
   for (const Eigen::Vector3i& index : changed_) {
     for (int axis = 0; axis < 3; ++axis) {
-      const Eigen::Vector3i neighbor = index - Eigen::Vector3i::Unit(axis);
-      if (blocks_.count(neighbor) != 0) {
-        result.insert(neighbor);
+      for (const int side : {-1, 1}) {
+        const Eigen::Vector3i neighbor = index + side * Eigen::Vector3i::Unit(axis);
+        if (blocks_.count(neighbor) != 0) {
+          result.insert(neighbor);
+        }
       }
     }
   }
   changed_.clear();
   return {result.begin(), result.end()};
+}
+
+std::vector<Eigen::Vector3i> TsdfVolume::occupied_voxels() const {
+  std::vector<Eigen::Vector3i> voxels;
+  for (const auto& [block_index, block] : blocks_) {
+    append_occupied_voxels(block_index, block, voxels);
+  }
+  return voxels;
+}
+
+std::vector<Eigen::Vector3i> TsdfVolume::occupied_voxels(const Eigen::Vector3i& block_index) const {
+  std::vector<Eigen::Vector3i> voxels;
+  if (const auto it = blocks_.find(block_index); it != blocks_.end()) {
+    append_occupied_voxels(block_index, it->second, voxels);
+  }
+  return voxels;
+}
+
+void TsdfVolume::append_occupied_voxels(const Eigen::Vector3i& block_index, const Block& block,
+                                        std::vector<Eigen::Vector3i>& voxels) const {
+  const Eigen::Vector3i origin = block_index * kBlockSize;
+  for (int z = 0; z < kBlockSize; ++z) {
+    for (int y = 0; y < kBlockSize; ++y) {
+      for (int x = 0; x < kBlockSize; ++x) {
+        const Eigen::Vector3i local(x, y, z);
+        const Voxel& v = block[linear_index(local)];
+        // Behind a surface, but not saturated: a saturated value next to free
+        // space is an occlusion edge, not a surface.
+        if (v.weight <= 0.0f || v.tsdf >= 0.0f || v.tsdf <= -1.0f) {
+          continue;
+        }
+        bool in_front_seen = false;
+        for (int axis = 0; axis < 3 && !in_front_seen; ++axis) {
+          for (const int side : {-1, 1}) {
+            const Voxel* n = find_voxel(origin + local + side * Eigen::Vector3i::Unit(axis));
+            if (n != nullptr && n->weight > 0.0f && n->tsdf >= 0.0f) {
+              in_front_seen = true;
+              break;
+            }
+          }
+        }
+        if (in_front_seen) {
+          voxels.push_back(origin + local);
+        }
+      }
+    }
+  }
 }
 
 void TsdfVolume::append_surface_points(const Eigen::Vector3i& block_index, const Block& block,

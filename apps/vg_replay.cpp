@@ -1,7 +1,9 @@
 // vg_replay: rebuild a map from a recorded capture session.
 //
-//   vg_replay <session.mcap> <heightmap.asc> [--rate R] [--voxel M] [--trunc M] [--cell M]
+//   vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] [--rate R] [--voxel M]
+//             [--trunc M] [--cell M]
 //
+// --voxels also writes the 3D voxel map as a PLY mesh of cubes.
 // --rate 1 replays in real time, printing the map's progress as it grows;
 // the default 0 runs as fast as possible.
 
@@ -15,12 +17,13 @@
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
 #include "vg_core/map_builder.hpp"
+#include "vg_core/voxel_map_io.hpp"
 
 namespace {
 
 int usage() {
-  std::cerr << "usage: vg_replay <session.mcap> <heightmap.asc> [--rate R] [--voxel M] "
-               "[--trunc M] [--cell M]\n";
+  std::cerr << "usage: vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] [--rate R] "
+               "[--voxel M] [--trunc M] [--cell M]\n";
   return 2;
 }
 
@@ -35,10 +38,15 @@ int main(int argc, char** argv) {
   vg::io::PlaybackOptions playback;
   playback.rate = 0.0;
   vg::MapBuilderConfig config;
+  std::string voxels_path;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
     if (i + 1 >= argc) {
       return usage();
+    }
+    if (arg == "--voxels") {
+      voxels_path = argv[++i];
+      continue;
     }
     const double value = std::atof(argv[++i]);
     if (arg == "--rate") {
@@ -67,7 +75,7 @@ int main(int argc, char** argv) {
           // Refresh the live height map every 10 depth frames, as an app would
           // a few times a second.
           if (std::holds_alternative<vg::io::DepthImage>(m) && ++depth_frames % 10 == 0) {
-            const auto changed = builder.update_height_map();
+            const auto changed = builder.update().height_cells;
             if (live) {
               std::cout << "t=" << static_cast<double>(vg::io::timestamp_of(m)) * 1e-9 << " s  "
                         << builder.stats().integrated << " frames  " << builder.height_map_cells()
@@ -78,7 +86,7 @@ int main(int argc, char** argv) {
         },
         playback);
     builder.flush();
-    builder.update_height_map();
+    builder.update();
 
     const auto& stats = builder.stats();
     std::cout << messages << " messages, " << stats.integrated << " depth frames integrated, "
@@ -89,6 +97,12 @@ int main(int argc, char** argv) {
     vg::save_height_map(map, output_path);
     std::cout << "height map " << map.width << " x " << map.height << " cells written to "
               << output_path << "\n";
+
+    if (!voxels_path.empty()) {
+      const auto voxels = builder.volume().occupied_voxels();
+      vg::save_voxels_ply(voxels, builder.volume().config().voxel_size, voxels_path);
+      std::cout << "voxel map " << voxels.size() << " voxels written to " << voxels_path << "\n";
+    }
   } catch (const std::exception& e) {
     std::cerr << "vg_replay: " << e.what() << "\n";
     return 1;

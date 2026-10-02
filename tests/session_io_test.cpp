@@ -326,7 +326,7 @@ TEST(SessionMapper, ReplayedSessionBuildsHeightMap) {
   EXPECT_EQ(builder.stats().integrated, 3u);
   EXPECT_EQ(builder.stats().skipped_no_pose, 1u);
 
-  builder.update_height_map();
+  builder.update();
   const auto map = builder.height_map();
   auto height_at = [&map](double x, double y) {
     const int cx = static_cast<int>(std::floor((x - map.origin.x()) / map.cell_size));

@@ -54,15 +54,24 @@ class MapBuilder {
   // Integrates or skips a depth frame still waiting for a pose.
   void flush();
 
-  // Brings the live height map up to date with everything integrated so far.
-  // Returns the cells that changed, for a view to redraw. Call it at the rate
-  // you want to refresh the display; the cost depends on how much changed.
-  std::vector<HeightCell> update_height_map();
+  // What changed since the previous update(), for a live view to redraw.
+  struct Update {
+    // Height map cells whose height changed (NaN: cell cleared).
+    std::vector<HeightCell> height_cells;
+    // Voxel blocks whose contents may have changed. For a 3D view, re-read
+    // each one with volume().occupied_voxels(block) and replace what was shown.
+    std::vector<Eigen::Vector3i> blocks;
+  };
 
-  // The live height map as of the last update_height_map() call.
+  // Brings the live height map up to date with everything integrated so far
+  // and reports what changed. Call it at the rate you want to refresh the
+  // display; the cost depends on how much changed.
+  Update update();
+
+  // The live height map as of the last update() call.
   HeightMap height_map() const { return height_map_.snapshot(); }
 
-  // Number of height map cells with a surface, as of the last update.
+  // Number of height map cells with a surface, as of the last update().
   std::size_t height_map_cells() const { return height_map_.size(); }
 
   const TsdfVolume& volume() const { return volume_; }

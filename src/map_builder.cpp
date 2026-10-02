@@ -67,8 +67,11 @@ void MapBuilder::resolve(const PoseStamped* next_pose) {
   ++stats_.integrated;
 }
 
-std::vector<HeightCell> MapBuilder::update_height_map() {
-  return height_map_.update(volume_, volume_.take_changed_blocks());
+MapBuilder::Update MapBuilder::update() {
+  Update result;
+  result.blocks = volume_.take_changed_blocks();
+  result.height_cells = height_map_.update(volume_, result.blocks);
+  return result;
 }
 
 }  // namespace vg

@@ -55,9 +55,19 @@ class TsdfVolume {
   // block and its +x, +y or +z neighbor). Empty if the block doesn't exist.
   std::vector<Eigen::Vector3d> extract_surface_points(const Eigen::Vector3i& block_index) const;
 
-  // Blocks whose surface points may have changed since the last call, for
-  // incremental consumers such as a live view. Includes the -x/-y/-z
-  // neighbors of updated blocks, since their boundary points read into them.
+  // Occupied voxels: the shell of voxels just behind each observed surface
+  // (signed distance below zero with an observed in-front neighbor). Together
+  // they form a 3D voxel map of everything seen. Indices are global; voxel
+  // (i, j, k) spans [i, j, k] * voxel_size to [i + 1, j + 1, k + 1] * voxel_size.
+  std::vector<Eigen::Vector3i> occupied_voxels() const;
+
+  // The occupied voxels inside one block. Empty if the block doesn't exist.
+  std::vector<Eigen::Vector3i> occupied_voxels(const Eigen::Vector3i& block_index) const;
+
+  // Blocks whose surface points or occupied voxels may have changed since the
+  // last call, for incremental consumers such as a live view. Includes the six
+  // face neighbors of updated blocks, since results near a block's edge read
+  // voxels across it.
   std::vector<Eigen::Vector3i> take_changed_blocks();
 
   // Edge length of a block, in meters. Block (i, j, k) spans
@@ -84,6 +94,8 @@ class TsdfVolume {
                        const Eigen::Isometry3d& camera_from_world);
   void append_surface_points(const Eigen::Vector3i& block_index, const Block& block,
                              std::vector<Eigen::Vector3d>& points) const;
+  void append_occupied_voxels(const Eigen::Vector3i& block_index, const Block& block,
+                              std::vector<Eigen::Vector3i>& voxels) const;
 
   TsdfConfig config_;
   std::unordered_map<Eigen::Vector3i, Block, IndexHash> blocks_;

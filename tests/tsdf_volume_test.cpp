@@ -107,6 +107,48 @@ TEST(TsdfVolume, ReportsChangedBlocksOnce) {
   EXPECT_TRUE(volume.extract_surface_points(Eigen::Vector3i(1000, 1000, 1000)).empty());
 }
 
+TEST(TsdfVolume, OccupiedVoxelsFormShellBelowGround) {
+  vg::TsdfVolume volume;
+  volume.integrate(render_depth(Scene{}, kTopDown), kTopDown);
+
+  const auto voxels = volume.occupied_voxels();
+  ASSERT_GT(voxels.size(), 1000u);
+  // The ground at z = 0 is the top face of the voxel layer k = -1.
+  for (const auto& v : voxels) {
+    EXPECT_EQ(v.z(), -1);
+  }
+
+  std::size_t per_block = 0;
+  for (const auto& block : volume.take_changed_blocks()) {
+    per_block += volume.occupied_voxels(block).size();
+  }
+  EXPECT_EQ(per_block, voxels.size());
+}
+
+TEST(TsdfVolume, OccupiedVoxelsShowRaisedBed) {
+  Scene scene;
+  scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.8, 0.3, 0.3}};
+  vg::TsdfVolume volume;
+  volume.integrate(render_depth(scene, kTopDown), kTopDown);
+
+  // Seen from above: a layer just under the bed's top (k = 14, z 0.28 to 0.30)
+  // over the bed, and just under the ground (k = -1) elsewhere.
+  std::size_t top = 0;
+  for (const auto& v : volume.occupied_voxels()) {
+    const double x = (v.x() + 0.5) * 0.02;
+    const double y = (v.y() + 0.5) * 0.02;
+    const bool inside = x > 0.22 && x < 0.78 && y > -0.28 && y < 0.28;
+    const bool outside = x < 0.18 || x > 0.82 || y < -0.32 || y > 0.32;
+    if (inside) {
+      EXPECT_EQ(v.z(), 14) << v.transpose();
+      ++top;
+    } else if (outside) {
+      EXPECT_LE(v.z(), 14) << v.transpose();
+    }
+  }
+  EXPECT_GT(top, 500u);  // The bed's top is 0.6 x 0.6 m: ~28 x 28 voxels.
+}
+
 TEST(HeightMap, KeepsHighestPointPerCell) {
   const auto map =
       vg::make_height_map({{0.05, 0.05, 1.0}, {0.07, 0.02, 2.0}, {0.25, 0.05, 0.5}}, 0.1);
