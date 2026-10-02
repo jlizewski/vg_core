@@ -23,6 +23,7 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
 add_library(vg_core
+  src/ground_segmentation.cpp
   src/height_map.cpp
   src/height_map_io.cpp
   src/live_height_map.cpp

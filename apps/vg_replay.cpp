@@ -1,9 +1,11 @@
 // vg_replay: rebuild a map from a recorded capture session.
 //
-//   vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] [--rate R] [--voxel M]
-//             [--trunc M] [--cell M]
+//   vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] [--ground ground.asc]
+//             [--objects objects.ply] [--rate R] [--voxel M] [--trunc M] [--cell M]
 //
 // --voxels also writes the 3D voxel map as a PLY mesh of cubes.
+// --ground writes the ground height map, with everything on the ground removed
+// and the holes it leaves patched; --objects writes those removed voxels.
 // --rate 1 replays in real time, printing the map's progress as it grows;
 // the default 0 runs as fast as possible.
 
@@ -12,7 +14,9 @@
 #include <iostream>
 #include <string>
 #include <variant>
+#include <vector>
 
+#include "vg_core/ground_segmentation.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
@@ -22,8 +26,9 @@
 namespace {
 
 int usage() {
-  std::cerr << "usage: vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] [--rate R] "
-               "[--voxel M] [--trunc M] [--cell M]\n";
+  std::cerr << "usage: vg_replay <session.mcap> <heightmap.asc> [--voxels map.ply] "
+               "[--ground ground.asc] [--objects objects.ply] [--rate R] [--voxel M] [--trunc M] "
+               "[--cell M]\n";
   return 2;
 }
 
@@ -39,6 +44,8 @@ int main(int argc, char** argv) {
   playback.rate = 0.0;
   vg::MapBuilderConfig config;
   std::string voxels_path;
+  std::string ground_path;
+  std::string objects_path;
   for (int i = 3; i < argc; ++i) {
     const std::string arg = argv[i];
     if (i + 1 >= argc) {
@@ -46,6 +53,14 @@ int main(int argc, char** argv) {
     }
     if (arg == "--voxels") {
       voxels_path = argv[++i];
+      continue;
+    }
+    if (arg == "--ground") {
+      ground_path = argv[++i];
+      continue;
+    }
+    if (arg == "--objects") {
+      objects_path = argv[++i];
       continue;
     }
     const double value = std::atof(argv[++i]);
@@ -102,6 +117,40 @@ int main(int argc, char** argv) {
       const auto voxels = builder.volume().occupied_voxels();
       vg::save_voxels_ply(voxels, builder.volume().config().voxel_size, voxels_path);
       std::cout << "voxel map " << voxels.size() << " voxels written to " << voxels_path << "\n";
+    }
+
+    if (!ground_path.empty() || !objects_path.empty()) {
+      vg::GroundConfig ground_config;
+      ground_config.cell_size = config.height_cell_size;
+      const auto split = vg::segment_ground(builder.volume(), ground_config);
+      std::size_t grounded = 0;
+      std::size_t object_voxels = 0;
+      for (const auto& segment : split.segments) {
+        grounded += segment.grounded ? 1 : 0;
+        object_voxels += segment.voxels.size();
+      }
+      std::cout << split.ground_voxels.size() << " ground voxels, " << split.segments.size()
+                << " objects (" << grounded << " standing on the ground, "
+                << split.segments.size() - grounded << " overhanging)\n";
+      if (!ground_path.empty()) {
+        const auto& ground = split.ground.heights;
+        vg::save_height_map(ground, ground_path);
+        std::size_t filled = 0;
+        for (const auto f : split.ground.filled) {
+          filled += f;
+        }
+        std::cout << "ground map " << ground.width << " x " << ground.height << " cells (" << filled
+                  << " patched) written to " << ground_path << "\n";
+      }
+      if (!objects_path.empty()) {
+        std::vector<Eigen::Vector3i> objects;
+        objects.reserve(object_voxels);
+        for (const auto& segment : split.segments) {
+          objects.insert(objects.end(), segment.voxels.begin(), segment.voxels.end());
+        }
+        vg::save_voxels_ply(objects, builder.volume().config().voxel_size, objects_path);
+        std::cout << "objects " << objects.size() << " voxels written to " << objects_path << "\n";
+      }
     }
   } catch (const std::exception& e) {
     std::cerr << "vg_replay: " << e.what() << "\n";
