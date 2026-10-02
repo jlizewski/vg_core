@@ -45,23 +45,32 @@ builder.set_camera_extrinsics("rgb", body_from_camera);  // once
 builder.add_pose(pose);                                  // every tracker pose
 builder.add_depth("rgb", depth_frame);                   // every depth frame
 // A few times a second, e.g. on the mapping thread before handing off to the UI:
-for (const vg::HeightCell& cell : builder.update_height_map()) {
+const vg::MapBuilder::Update update = builder.update();
+for (const vg::HeightCell& cell : update.height_cells) {
   redraw(cell.x, cell.y, cell.height);  // NaN height: cell cleared
+}
+for (const Eigen::Vector3i& block : update.blocks) {
+  redraw_voxels(block, builder.volume().occupied_voxels(block));  // 3D view
 }
 ```
 
-`update_height_map()` only re-reads the parts of the map that changed since
-the last call. `builder.height_map()` gives the whole map, e.g. to export.
+`update()` only re-reads the parts of the map that changed since the last
+call. The height map is a 2.5D view; the 3D view is the occupied voxels, the
+solid voxels at the observed surface, as integer indices (multiply by the
+voxel size for meters). `builder.height_map()` and
+`builder.volume().occupied_voxels()` give the whole map, e.g. to export.
 
 ## Replaying a recording
 
 `vg_replay` rebuilds a map from a capture session
-([format](docs/capture-format.md)) and writes its height map:
+([format](docs/capture-format.md)) and writes its height map, and optionally the 3D voxel map as a PLY mesh of
+cubes (opens in MeshLab, Blender or CloudCompare):
 
 ```sh
 build/debug/vg_replay session.mcap garden.asc            # as fast as possible
 build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
 build/debug/vg_replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
+build/debug/vg_replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
 ```
 
 The same session opens in [Foxglove](https://foxglove.dev) for inspection.

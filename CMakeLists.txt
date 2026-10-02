@@ -28,6 +28,7 @@ add_library(vg_core
   src/live_height_map.cpp
   src/map_builder.cpp
   src/tsdf_volume.cpp
+  src/voxel_map_io.cpp
   src/version.cpp)
 add_library(vg_core::vg_core ALIAS vg_core)
 

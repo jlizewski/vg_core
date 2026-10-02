@@ -4,6 +4,8 @@
 
 #include <cmath>
 #include <map>
+#include <set>
+#include <tuple>
 #include <utility>
 
 #include "test_scene.hpp"
@@ -69,16 +71,22 @@ void expect_same_map(const vg::HeightMap& a, const vg::HeightMap& b) {
 
 TEST(MapBuilder, LiveHeightMapMatchesFullRebuild) {
   vg::MapBuilder builder(test_config());
-  // Mirror of the live map built only from the reported changes, as a view would.
+  // Mirrors of the live maps built only from the reported changes, as views would.
   std::map<std::pair<int, int>, float> view;
+  std::map<std::tuple<int, int, int>, std::vector<Eigen::Vector3i>> voxel_view;  // By block.
 
   vg::Timestamp t = 0;
   for (const auto& pose : walk()) {
     builder.add_pose(pose_at(t, pose));
     builder.add_depth("rgb", depth_at(t, pose));
     builder.flush();
-    const auto changed = builder.update_height_map();
+    const auto update = builder.update();
+    const auto& changed = update.height_cells;
     EXPECT_FALSE(changed.empty());
+    EXPECT_FALSE(update.blocks.empty());
+    for (const Eigen::Vector3i& block : update.blocks) {
+      voxel_view[{block.x(), block.y(), block.z()}] = builder.volume().occupied_voxels(block);
+    }
     for (const vg::HeightCell& cell : changed) {
       if (std::isnan(cell.height)) {
         view.erase({cell.x, cell.y});
@@ -103,8 +111,23 @@ TEST(MapBuilder, LiveHeightMapMatchesFullRebuild) {
     EXPECT_FLOAT_EQ(map.at(x, y), height);
   }
 
+  // The 3D mirror holds exactly the volume's occupied voxels.
+  std::set<std::tuple<int, int, int>> mirrored;
+  for (const auto& [block, voxels] : voxel_view) {
+    for (const auto& v : voxels) {
+      mirrored.insert({v.x(), v.y(), v.z()});
+    }
+  }
+  std::set<std::tuple<int, int, int>> expected;
+  for (const auto& v : builder.volume().occupied_voxels()) {
+    expected.insert({v.x(), v.y(), v.z()});
+  }
+  EXPECT_EQ(mirrored, expected);
+
   // Nothing new integrated: nothing changes.
-  EXPECT_TRUE(builder.update_height_map().empty());
+  const auto nothing = builder.update();
+  EXPECT_TRUE(nothing.height_cells.empty());
+  EXPECT_TRUE(nothing.blocks.empty());
 
   // The raised bed and the ground are where they should be.
   auto height_at = [&map](double x, double y) {
@@ -135,7 +158,7 @@ TEST(MapBuilder, PairsDepthWithClosestPose) {
   EXPECT_EQ(builder.stats().skipped_no_pose, 1u);
 
   // With the right poses, the ground stays flat at z = 0.
-  builder.update_height_map();
+  builder.update();
   const auto map = builder.height_map();
   const int x = static_cast<int>(std::floor((-0.4 - map.origin.x()) / map.cell_size));
   const int y = static_cast<int>(std::floor((0.0 - map.origin.y()) / map.cell_size));
@@ -170,7 +193,7 @@ TEST(MapBuilder, AppliesCameraExtrinsics) {
     t += 33 * kMs;
   }
   builder.flush();
-  builder.update_height_map();
+  builder.update();
 
   // Views would disagree by 10 cm if the offset were ignored; the bed's edge
   // at x = 0.2 stays sharp.
