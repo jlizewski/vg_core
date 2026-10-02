@@ -6,6 +6,7 @@ Run from anywhere inside the repository, e.g.:
     vg test             # build, then run the C++ unit tests
     vg format --check   # verify clang-format on C++ sources
     vg schemas          # regenerate embedded MCAP schema descriptors
+    vg heatmap sun.asc sun.png   # render a sun map (or any .asc grid) as a PNG
 """
 
 from __future__ import annotations
@@ -82,6 +83,18 @@ def cmd_schemas(args: argparse.Namespace, root: Path) -> int:
     return schemas.generate(root)
 
 
+def cmd_heatmap(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import heatmap
+
+    try:
+        lo, hi = heatmap.write_heatmap(args.grid, args.png, args.scale, args.min, args.max)
+    except (OSError, ValueError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    print(f"{args.png}: {lo:g} (dark) to {hi:g} (bright)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="vg", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -101,6 +114,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("schemas", help="regenerate embedded MCAP schema descriptors")
     p.set_defaults(func=cmd_schemas)
+
+    p = sub.add_parser("heatmap", help="render an .asc grid such as a sun map as a heatmap PNG")
+    p.add_argument("grid", type=Path, help="input ESRI ASCII grid (.asc)")
+    p.add_argument("png", type=Path, help="output PNG")
+    p.add_argument("--scale", type=int, default=4, help="pixels per cell (default: 4)")
+    p.add_argument("--min", type=float, help="value shown darkest (default: grid minimum)")
+    p.add_argument("--max", type=float, help="value shown brightest (default: grid maximum)")
+    p.set_defaults(func=cmd_heatmap)
 
     return parser
 
