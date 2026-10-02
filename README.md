@@ -60,6 +60,31 @@ solid voxels at the observed surface, as integer indices (multiply by the
 voxel size for meters). `builder.height_map()` and
 `builder.volume().occupied_voxels()` give the whole map, e.g. to export.
 
+## Separating the ground
+
+`vg::segment_ground()` splits the 3D voxel map into the ground and everything
+on or over it, so the ground can be mapped on its own and the rest classified
+later:
+
+```cpp
+const vg::GroundSegmentation split = vg::segment_ground(builder.volume());
+split.ground.heights;   // 2.5D ground height map, holes under objects patched
+split.ground.filled;    // which cells were patched rather than seen
+for (const vg::MapSegment& segment : split.segments) {  // largest first
+  segment.voxels;               // a connected object, structure or overhang
+  segment.grounded;             // stands on the ground (false: overhang)
+  segment.top_above_ground;     // height in meters, e.g. of a plant
+}
+```
+
+The ground is the largest stretch of the map's lowest surfaces that slopes no
+more steeply than `GroundConfig::max_slope`; raised bed tops, decks and
+canopies are kept out because they drop off steeply to the ground around
+them. Holes in the ground map where objects stood, or small unseen holes
+enclosed by ground, are filled by smooth interpolation from the ground
+around them. It reprocesses the whole map, so run it occasionally (e.g. when
+a scan ends) rather than on every `update()`.
+
 ## Replaying a recording
 
 `vg_replay` rebuilds a map from a capture session
@@ -71,6 +96,7 @@ build/debug/vg_replay session.mcap garden.asc            # as fast as possible
 build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
 build/debug/vg_replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
 build/debug/vg_replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
+build/debug/vg_replay session.mcap garden.asc --ground ground.asc --objects objects.ply
 ```
 
 The same session opens in [Foxglove](https://foxglove.dev) for inspection.
