@@ -16,9 +16,12 @@ endif()
 include(GoogleTest)
 
 add_executable(vg_core_tests
+  geo_reference_test.cpp
   ground_segmentation_test.cpp
   height_map_io_test.cpp
   map_builder_test.cpp
+  solar_test.cpp
+  sun_map_test.cpp
   tsdf_volume_test.cpp
   version_test.cpp
   voxel_map_io_test.cpp)

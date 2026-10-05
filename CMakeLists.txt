@@ -23,11 +23,14 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
 add_library(vg_core
+  src/geo_reference.cpp
   src/ground_segmentation.cpp
   src/height_map.cpp
   src/height_map_io.cpp
   src/live_height_map.cpp
   src/map_builder.cpp
+  src/solar.cpp
+  src/sun_map.cpp
   src/tsdf_volume.cpp
   src/voxel_map_io.cpp
   src/version.cpp)
@@ -39,7 +42,8 @@ target_include_directories(vg_core
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>)
-target_link_libraries(vg_core PUBLIC Eigen3::Eigen)
+find_package(Threads REQUIRED)
+target_link_libraries(vg_core PUBLIC Eigen3::Eigen Threads::Threads)
 vg_core_set_warnings(vg_core)
 
 configure_file(
