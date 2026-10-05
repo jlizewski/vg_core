@@ -106,6 +106,10 @@ std::optional<DepthSpool::Entry> DepthSpool::pop() {
   if (!in_.is_open()) {
     in_.open(path_, std::ios::binary);
   }
+  // A read may have buffered up to the old end of the file, so seek to where the next record
+  // starts each time; seeking drops the stale buffer and any end-of-file state.
+  in_.clear();
+  in_.seekg(read_offset_);
   Stored stored;
   std::uint32_t camera_size = 0;
   read_value(in_, camera_size);
@@ -121,6 +125,7 @@ std::optional<DepthSpool::Entry> DepthSpool::pop() {
   if (!in_) {
     throw std::runtime_error("Could not read back depth spool " + path_);
   }
+  read_offset_ = in_.tellg();
   --size_;
   return to_entry(std::move(stored));
 }

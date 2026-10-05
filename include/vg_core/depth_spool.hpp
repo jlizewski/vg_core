@@ -65,6 +65,7 @@ class DepthSpool {
   std::string path_;
   std::ofstream out_;
   std::ifstream in_;
+  std::streamoff read_offset_ = 0;  // Where the next record starts in the file.
   std::deque<Stored> memory_;
   std::size_t size_ = 0;
 };
