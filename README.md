@@ -60,6 +60,28 @@ solid voxels at the observed surface, as integer indices (multiply by the
 voxel size for meters). `builder.height_map()` and
 `builder.volume().occupied_voxels()` give the whole map, e.g. to export.
 
+### Keyframes and finishing later
+
+Fusing every depth frame live is more than a phone needs to show what has been
+covered. With keyframing on, only frames taken after the camera has moved or
+turned far enough are fused live; the rest are deferred, with the pose they
+were paired with, to a spool file. Once recording stops, fuse them in batches
+(on a background thread, say) so the finished map holds every frame:
+
+```cpp
+vg::MapBuilderConfig config;
+config.keyframe_translation = 0.15;           // meters
+config.keyframe_rotation = 10.0 * kDegree;    // radians
+config.deferred_path = cache_dir + "/map.spool";  // or empty: keep in memory
+vg::MapBuilder builder(config);
+// ... live: add_pose / add_depth / update as above. While the mapping thread
+// has a backlog, builder.set_live(false) defers every frame instead.
+builder.flush();
+while (builder.integrate_deferred(10) > 0) {
+  builder.update();  // report progress
+}
+```
+
 ## Separating the ground
 
 `vg::segment_ground()` splits the 3D voxel map into the ground and everything

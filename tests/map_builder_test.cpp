@@ -17,6 +17,7 @@ using vg::test::look_at;
 using vg::test::render_depth;
 
 constexpr vg::Timestamp kMs = 1'000'000;
+constexpr double kDegree = 3.14159265358979323846 / 180.0;
 
 vg::test::Scene raised_bed() {
   vg::test::Scene scene;
@@ -205,6 +206,115 @@ TEST(MapBuilder, AppliesCameraExtrinsics) {
   };
   EXPECT_NEAR(height_at(0.28, 0.0), 0.3, 0.03);
   EXPECT_NEAR(height_at(0.12, 0.0), 0.0, 0.03);
+}
+
+// A walk along a line in small steps, the camera looking ahead at the bed.
+std::vector<Eigen::Isometry3d> slow_walk(int steps, double step) {
+  std::vector<Eigen::Isometry3d> poses;
+  for (int i = 0; i < steps; ++i) {
+    const Eigen::Vector3d eye(-1.0 + i * step, -0.5, 1.4);
+    poses.push_back(look_at(eye, eye + Eigen::Vector3d(1.5, 0.5, -1.4), Eigen::Vector3d::UnitZ()));
+  }
+  return poses;
+}
+
+// Depth rounded to whole millimeters, as deferred frames are stored.
+vg::DepthFrame depth_mm_at(vg::Timestamp t, const Eigen::Isometry3d& world_from_camera) {
+  vg::DepthFrame frame = depth_at(t, world_from_camera);
+  for (float& d : frame.depth) {
+    d = static_cast<float>(std::lround(d * 1000.0f)) * 0.001f;
+  }
+  return frame;
+}
+
+void expect_close_map(const vg::HeightMap& a, const vg::HeightMap& b) {
+  ASSERT_EQ(a.width, b.width);
+  ASSERT_EQ(a.height, b.height);
+  for (int y = 0; y < a.height; ++y) {
+    for (int x = 0; x < a.width; ++x) {
+      ASSERT_EQ(a.has_data(x, y), b.has_data(x, y)) << x << "," << y;
+      if (a.has_data(x, y)) {
+        EXPECT_NEAR(a.at(x, y), b.at(x, y), 1e-4) << x << "," << y;
+      }
+    }
+  }
+}
+
+TEST(MapBuilder, FusesOnlyKeyframesLiveAndTheRestLater) {
+  // 5 cm steps with 20 cm keyframes: every fourth frame is fused live.
+  const auto poses = slow_walk(16, 0.05);
+  vg::MapBuilderConfig config = test_config();
+  config.keyframe_translation = 0.2;
+  config.keyframe_rotation = 0.5;
+  vg::MapBuilder keyframed(config);
+  vg::MapBuilder every_frame(test_config());
+
+  vg::Timestamp t = 0;
+  for (const auto& pose : poses) {
+    for (vg::MapBuilder* builder : {&keyframed, &every_frame}) {
+      builder->add_pose(pose_at(t, pose));
+      builder->add_depth("rgb", depth_mm_at(t, pose));
+    }
+    t += 100 * kMs;
+  }
+  keyframed.flush();
+  every_frame.flush();
+
+  EXPECT_EQ(keyframed.stats().integrated, 4u);
+  EXPECT_EQ(keyframed.stats().deferred, 12u);
+  EXPECT_EQ(keyframed.deferred_frames(), 12u);
+  EXPECT_EQ(every_frame.stats().integrated, 16u);
+  EXPECT_EQ(every_frame.stats().deferred, 0u);
+
+  // The keyframes alone already map the bed.
+  keyframed.update();
+  EXPECT_GT(keyframed.height_map_cells(), 0u);
+
+  // Fusing the deferred frames later gives the map every frame gives live.
+  EXPECT_EQ(keyframed.integrate_deferred(5), 7u);
+  EXPECT_EQ(keyframed.integrate_deferred(100), 0u);
+  EXPECT_EQ(keyframed.stats().integrated, 16u);
+  keyframed.update();
+  every_frame.update();
+  expect_close_map(keyframed.height_map(), every_frame.height_map());
+}
+
+TEST(MapBuilder, TurningInPlaceMakesKeyframes) {
+  vg::MapBuilderConfig config = test_config();
+  config.keyframe_translation = 0.2;
+  config.keyframe_rotation = 10.0 * kDegree;
+  vg::MapBuilder builder(config);
+
+  // Standing still, turning 4 degrees a frame: a keyframe every third frame.
+  const Eigen::Vector3d eye(-1.0, 0.0, 1.4);
+  vg::Timestamp t = 0;
+  for (int i = 0; i < 7; ++i) {
+    const double yaw = i * 4.0 * kDegree;
+    const Eigen::Vector3d ahead(std::cos(yaw), std::sin(yaw), -1.0);
+    const auto pose = look_at(eye, eye + ahead, Eigen::Vector3d::UnitZ());
+    builder.add_pose(pose_at(t, pose));
+    builder.add_depth("rgb", depth_at(t, pose));
+    t += 100 * kMs;
+  }
+  builder.flush();
+  EXPECT_EQ(builder.stats().integrated, 3u);
+  EXPECT_EQ(builder.stats().deferred, 4u);
+}
+
+TEST(MapBuilder, DefersEverythingWhileNotLive) {
+  const auto poses = walk();
+  vg::MapBuilder builder(test_config());
+  builder.set_live(false);
+  builder.add_pose(pose_at(0, poses[0]));
+  builder.add_depth("rgb", depth_at(0, poses[0]));
+  builder.set_live(true);
+  builder.add_pose(pose_at(33 * kMs, poses[1]));
+  builder.add_depth("rgb", depth_at(33 * kMs, poses[1]));
+  builder.flush();
+  EXPECT_EQ(builder.stats().integrated, 1u);
+  EXPECT_EQ(builder.deferred_frames(), 1u);
+  EXPECT_EQ(builder.integrate_deferred(10), 0u);
+  EXPECT_EQ(builder.stats().integrated, 2u);
 }
 
 }  // namespace

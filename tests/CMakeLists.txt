@@ -16,6 +16,7 @@ endif()
 include(GoogleTest)
 
 add_executable(vg_core_tests
+  depth_spool_test.cpp
   geo_reference_test.cpp
   ground_segmentation_test.cpp
   height_map_io_test.cpp
