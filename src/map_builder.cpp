@@ -1,5 +1,6 @@
 #include "vg_core/map_builder.hpp"
 
+#include <cmath>
 #include <cstdlib>
 
 namespace vg {
@@ -23,7 +24,7 @@ void MapBuilder::add_depth(const std::string& camera, const DepthFrame& frame) {
   if (pending_) {
     resolve(nullptr);
   }
-  pending_ = PendingDepth{camera, frame, tracking_ok_};
+  pending_ = PendingDepth{camera, frame, tracking_ok_, live_};
 }
 
 void MapBuilder::flush() {
@@ -63,8 +64,49 @@ void MapBuilder::resolve(const PoseStamped* next_pose) {
   if (const auto it = extrinsics_.find(pending.camera); it != extrinsics_.end()) {
     body_from_camera = it->second;
   }
-  volume_.integrate(pending.frame, best->world_from_frame * body_from_camera);
+  const Eigen::Isometry3d world_from_camera = best->world_from_frame * body_from_camera;
+  if (pending.live && is_keyframe(pending.camera, world_from_camera)) {
+    integrate(pending.camera, pending.frame, world_from_camera);
+    return;
+  }
+  if (!deferred_) {
+    deferred_ = config_.deferred_path.empty() ? std::make_unique<DepthSpool>()
+                                              : std::make_unique<DepthSpool>(config_.deferred_path);
+  }
+  deferred_->push(pending.camera, pending.frame, world_from_camera);
+  ++stats_.deferred;
+}
+
+bool MapBuilder::is_keyframe(const std::string& camera,
+                             const Eigen::Isometry3d& world_from_camera) const {
+  if (config_.keyframe_translation <= 0.0 && config_.keyframe_rotation <= 0.0) {
+    return true;
+  }
+  const auto it = last_integrated_.find(camera);
+  if (it == last_integrated_.end()) {
+    return true;
+  }
+  const Eigen::Isometry3d delta = it->second.inverse() * world_from_camera;
+  const double angle = Eigen::AngleAxisd(delta.linear()).angle();
+  return (config_.keyframe_translation > 0.0 &&
+          delta.translation().norm() >= config_.keyframe_translation) ||
+         (config_.keyframe_rotation > 0.0 && std::abs(angle) >= config_.keyframe_rotation);
+}
+
+void MapBuilder::integrate(const std::string& camera, const DepthFrame& frame,
+                           const Eigen::Isometry3d& world_from_camera) {
+  volume_.integrate(frame, world_from_camera);
+  last_integrated_[camera] = world_from_camera;
   ++stats_.integrated;
+}
+
+std::size_t MapBuilder::integrate_deferred(std::size_t max_frames) {
+  for (std::size_t i = 0; i < max_frames && deferred_frames() > 0; ++i) {
+    const auto entry = deferred_->pop();
+    volume_.integrate(entry->frame, entry->world_from_camera);
+    ++stats_.integrated;
+  }
+  return deferred_frames();
 }
 
 MapBuilder::Update MapBuilder::update() {
