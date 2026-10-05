@@ -107,6 +107,32 @@ enclosed by ground, are filled by smooth interpolation from the ground
 around them. It reprocesses the whole map, so run it occasionally (e.g. when
 a scan ends) rather than on every `update()`.
 
+## Sun map
+
+`vg::compute_sun_map()` works out how much direct sun each ground cell gets
+over a period, such as a whole year. At each time step it computes where the
+sun is for the map's place on the Earth (NOAA solar position algorithm) and
+casts a ray from every ground cell toward it through the 3D voxel map;
+cells whose ray escapes are in sun.
+
+```cpp
+// Where the map is: latitude/longitude from the GPS fixes, and the world
+// frame's heading from lining up the GPS track with the pose track.
+const auto geo = vg::estimate_geo_reference(gps_fixes, poses);
+const auto config = vg::sun_map_config_for_year(2026);  // hourly steps
+const vg::SunMap sun = vg::compute_sun_map(split.ground, builder.volume().occupied_voxels(),
+                                           voxel_size, *geo, config);
+sun.sun_hours;       // hours of direct sun per ground cell, same layout as the ground map
+sun.irradiation;     // clear-sky direct energy per cell, kWh/m^2 (slope and sun angle)
+sun.daylight_hours;  // the most any cell could get
+```
+
+It assumes a clear sky and open space beyond the mapped area. The heading
+from GPS is only as good as the walk was long compared with the GPS error;
+`GeoReference::heading_sigma` says how well it is known. A year at hourly steps
+over a 10 m x 10 m map at 5 cm cells takes about 15 s on 4 cores (release
+build).
+
 ## Replaying a recording
 
 `vg_replay` rebuilds a map from a capture session
@@ -119,7 +145,14 @@ build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed, pr
 build/debug/vg_replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
 build/debug/vg_replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
 build/debug/vg_replay session.mcap garden.asc --ground ground.asc --objects objects.ply
+build/debug/vg_replay session.mcap garden.asc --sun-map sun.asc --sun-energy energy.asc
+vg heatmap sun.asc sun.png                                # view the sun map as a heatmap
 ```
+
+`--sun-map` simulates the current year by default (`--year 2027`, and
+`--sun-step 30` for 30-minute steps). If the session has no GPS, or the walk was
+too short to tell which way the map faces, pass `--lat`/`--lon` and
+`--x-bearing` (compass bearing of the map's +x axis).
 
 The same session opens in [Foxglove](https://foxglove.dev) for inspection.
 In code, `vg::io::SessionReader` plus `vg::io::play()` give the same playback
@@ -148,6 +181,7 @@ vg format [--check] # clang-format C++ sources
 pytest tools        # test the tools themselves
 vg schemas          # regenerate src/io/schema_descriptors.cpp after editing schemas/
                     # (needs: pip install -e "tools[schemas]")
+vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a heatmap PNG
 ```
 
 ## License
