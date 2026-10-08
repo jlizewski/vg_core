@@ -7,6 +7,8 @@ Run from anywhere inside the repository, e.g.:
     vg format --check   # verify clang-format on C++ sources
     vg schemas          # regenerate embedded MCAP schema descriptors
     vg heatmap sun.asc sun.png   # render a sun map (or any .asc grid) as a PNG
+    vg replay rec.mcap map.asc   # run a C++ app from apps/ (see vg_tools/apps.py)
+    vg mcap repair rec.mcap      # index a recording that was never closed
 """
 
 from __future__ import annotations
@@ -18,8 +20,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from vg_tools import apps
+
 CPP_DIRS = ("apps", "include", "src", "tests")
 CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
+# Commands implemented here; a C++ app can't take one of these names.
+BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -29,6 +35,15 @@ def repo_root(start: Path | None = None) -> Path:
         if (candidate / "CMakePresets.json").is_file():
             return candidate
     raise SystemExit("vg: could not find the vg_core root (no CMakePresets.json)")
+
+
+def find_root() -> Path:
+    """The checkout containing the current directory, else the one these tools
+    were installed from, so apps can be run on files anywhere."""
+    try:
+        return repo_root(Path.cwd())
+    except SystemExit:
+        return repo_root()
 
 
 def run(cmd: Sequence[str], cwd: Path) -> int:
@@ -95,8 +110,36 @@ def cmd_heatmap(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="vg", description=__doc__.splitlines()[0])
+def add_app_parsers(sub: argparse._SubParsersAction, app_list: Sequence[apps.App]) -> None:
+    """List the C++ apps in --help. main() runs them before argparse sees their
+    arguments, so these parsers are only for help (and `vg mcap` alone)."""
+    groups: dict[tuple[str, ...], argparse._SubParsersAction] = {(): sub}
+    for app in app_list:
+        for i in range(1, len(app.words)):
+            prefix = app.words[:i]
+            if prefix not in groups:
+                parent = groups.get(prefix[:-1])
+                if parent is None or prefix[-1] in parent.choices:
+                    break
+                group = parent.add_parser(prefix[-1], help=f"{' '.join(prefix)} tools")
+                groups[prefix] = group.add_subparsers(dest=" ".join(prefix), required=True)
+        parent = groups.get(app.words[:-1])
+        if parent is None or app.words[-1] in parent.choices:
+            continue  # Hidden by a built-in command or another app.
+        p = parent.add_parser(
+            app.words[-1],
+            help=f"{app.help} (runs {app.target})" if app.help else f"run {app.target}",
+            add_help=False,
+        )
+        p.add_argument("args", nargs=argparse.REMAINDER)
+
+
+def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="vg",
+        description=__doc__.splitlines()[0],
+        epilog="C++ apps take --vg-preset NAME and --vg-no-build; other arguments go to the app.",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     for name, func, help_text in (
@@ -123,12 +166,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max", type=float, help="value shown brightest (default: grid maximum)")
     p.set_defaults(func=cmd_heatmap)
 
+    add_app_parsers(sub, apps.discover(root or repo_root()))
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return args.func(args, repo_root(Path.cwd()))
+    argv = list(sys.argv[1:] if argv is None else argv)
+    root = find_root()
+    if argv and argv[0] not in BUILTINS:
+        app = apps.match(apps.discover(root), argv)
+        if app is not None:
+            return apps.run(app, argv[len(app.words) :], root)
+    args = build_parser(root).parse_args(argv)
+    return args.func(args, root)
 
 
 if __name__ == "__main__":

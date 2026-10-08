@@ -58,6 +58,7 @@ if(VG_CORE_BUILD_IO)
   include(cmake/IoDependencies.cmake)
   add_library(vg_core_io
     src/io/mcap_impl.cpp
+    src/io/mcap_repair.cpp
     src/io/messages.cpp
     src/io/protobuf.cpp
     src/io/schema_descriptors.cpp
@@ -70,10 +71,17 @@ if(VG_CORE_BUILD_IO)
   set_target_properties(vg_core_io PROPERTIES CXX_EXTENSIONS OFF)
   vg_core_set_warnings(vg_core_io)
 
+  # Each apps/vg_<name>.cpp is a target vg_<name>, which the Python tools run
+  # as `vg <name>` (underscores become subcommand words: vg_mcap_repair is
+  # `vg mcap repair`). See tools/vg_tools/apps.py.
   if(VG_CORE_BUILD_APPS)
-    add_executable(vg_replay apps/vg_replay.cpp)
-    target_link_libraries(vg_replay PRIVATE vg_core_io)
-    vg_core_set_warnings(vg_replay)
+    file(GLOB _vg_core_apps CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/apps/vg_*.cpp)
+    foreach(source ${_vg_core_apps})
+      get_filename_component(app ${source} NAME_WE)
+      add_executable(${app} ${source})
+      target_link_libraries(${app} PRIVATE vg_core_io)
+      vg_core_set_warnings(${app})
+    endforeach()
   endif()
 endif()
 
