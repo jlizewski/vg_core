@@ -190,6 +190,26 @@ SessionReader::SessionReader(const std::filesystem::path& path) : impl_(std::mak
 
 SessionReader::~SessionReader() = default;
 
+std::optional<std::pair<Timestamp, Timestamp>> SessionReader::time_range() const {
+  // Reading in time order has already loaded the summary, if the file has one.
+  const mcap::McapReader& reader = impl_->reader;
+  if (const auto& stats = reader.statistics(); stats && stats->messageCount > 0) {
+    return std::pair{static_cast<Timestamp>(stats->messageStartTime),
+                     static_cast<Timestamp>(stats->messageEndTime)};
+  }
+  const auto& chunks = reader.chunkIndexes();
+  if (chunks.empty()) {
+    return std::nullopt;
+  }
+  mcap::Timestamp first = chunks.front().messageStartTime;
+  mcap::Timestamp last = chunks.front().messageEndTime;
+  for (const mcap::ChunkIndex& chunk : chunks) {
+    first = std::min(first, chunk.messageStartTime);
+    last = std::max(last, chunk.messageEndTime);
+  }
+  return std::pair{static_cast<Timestamp>(first), static_cast<Timestamp>(last)};
+}
+
 bool SessionReader::indexed() const { return impl_->indexed; }
 
 std::optional<SessionMessage> SessionReader::next() {

@@ -159,6 +159,22 @@ In code, `vg::io::SessionReader` plus `vg::io::play()` give the same playback
 with a callback per message, and `vg::io::SessionMapper` feeds it into a
 `vg::MapBuilder`.
 
+To drive an app's live pipeline from a recording, as if it were happening now,
+`vg::io::SessionPlayer` hands out one message at a time on the recorded
+schedule, and can be paused or sped up while it plays:
+
+```cpp
+vg::io::SessionPlayer player("session.mcap");  // real time
+// On a playback thread:
+while (auto message = player.next()) {
+  feed_live_pipeline(*message);
+}
+// From the UI, at any time:
+player.set_paused(true);
+player.set_rate(4.0);
+show_progress(player.position(), player.duration());
+```
+
 To consume vg_core from another CMake project:
 
 ```cmake
