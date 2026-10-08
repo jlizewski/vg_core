@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -256,6 +257,78 @@ TEST(SessionPlayer, StopsWhenCallbackReturnsFalse) {
   const auto count =
       vg::io::play(reader, [&seen](const SessionMessage&) { return ++seen < 3; }, options);
   EXPECT_EQ(count, 3u);
+}
+
+// IMU samples every 25 ms from 5 ms to 105 ms, after the session info at 5 ms.
+void write_imu_session(const std::filesystem::path& path) {
+  vg::io::SessionWriter writer(path, test_info());
+  for (int i = 0; i <= 4; ++i) {
+    vg::ImuSample imu;
+    imu.timestamp = 5 * kMs + i * 25 * kMs;
+    writer.write(imu);
+  }
+}
+
+TEST(SessionIo, ReportsTimeRange) {
+  TempFile file("vg_session_range");
+  write_imu_session(file.path());
+  vg::io::SessionReader reader(file.path());
+  const auto range = reader.time_range();
+  ASSERT_TRUE(range.has_value());
+  EXPECT_EQ(range->first, 5 * kMs);
+  EXPECT_EQ(range->second, 105 * kMs);
+}
+
+TEST(SessionPlayer, PlaysLiveAndReportsPosition) {
+  TempFile file("vg_session_live");
+  write_imu_session(file.path());
+  vg::io::SessionPlayer player(file.path());
+  EXPECT_EQ(player.duration(), 100 * kMs);
+  const auto start = std::chrono::steady_clock::now();
+  std::size_t count = 0;
+  while (player.next()) {
+    ++count;
+  }
+  EXPECT_EQ(count, 6u);
+  EXPECT_GE(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(100));
+  EXPECT_EQ(player.position(), 100 * kMs);
+}
+
+TEST(SessionPlayer, ChangesSpeedWhilePlaying) {
+  TempFile file("vg_session_speed");
+  write_imu_session(file.path());
+  vg::io::SessionPlayer player(file.path());
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(player.next());
+  player.set_rate(10.0);
+  while (player.next()) {
+  }
+  // 100 ms of session at 10x takes 10 ms; at 1x it would take 100 ms.
+  EXPECT_LT(std::chrono::steady_clock::now() - start, std::chrono::milliseconds(80));
+  EXPECT_DOUBLE_EQ(player.rate(), 10.0);
+}
+
+TEST(SessionPlayer, WaitsWhilePausedAndStops) {
+  TempFile file("vg_session_pause");
+  write_imu_session(file.path());
+  vg::io::SessionPlayer player(file.path(), 0.0);
+  ASSERT_TRUE(player.next());
+  player.set_paused(true);
+  EXPECT_TRUE(player.paused());
+
+  auto waiting = std::async(std::launch::async, [&player] { return player.next().has_value(); });
+  EXPECT_EQ(waiting.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  player.set_paused(false);
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_TRUE(waiting.get());
+
+  player.set_paused(true);
+  auto stopped = std::async(std::launch::async, [&player] { return player.next().has_value(); });
+  EXPECT_EQ(stopped.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  player.stop();
+  ASSERT_EQ(stopped.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_FALSE(stopped.get());
+  EXPECT_FALSE(player.next());
 }
 
 TEST(SessionMapper, ReplayedSessionBuildsHeightMap) {
