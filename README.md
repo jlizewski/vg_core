@@ -18,7 +18,7 @@ on any platform.
 | `tests/` | C++ unit tests (GoogleTest) |
 | `cmake/` | CMake helper modules |
 | `src/io/`, `include/vg_core/io/` | `vg_core_io`: capture session recording and playback (MCAP) |
-| `apps/` | Command-line apps (`vg_replay`) |
+| `apps/` | Command-line apps (`vg_replay`, `vg_mcap_repair`), run as `vg replay`, `vg mcap repair` |
 | `tools/` | Python development tools (`vg` CLI) |
 | `docs/` | Design docs, including the [capture format](docs/capture-format.md) |
 | `schemas/` | Protobuf schemas for vg-specific capture messages |
@@ -140,19 +140,32 @@ build).
 cubes (opens in MeshLab, Blender or CloudCompare):
 
 ```sh
-build/debug/vg_replay session.mcap garden.asc            # as fast as possible
-build/debug/vg_replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
-build/debug/vg_replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
-build/debug/vg_replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
-build/debug/vg_replay session.mcap garden.asc --ground ground.asc --objects objects.ply
-build/debug/vg_replay session.mcap garden.asc --sun-map sun.asc --sun-energy energy.asc
-vg heatmap sun.asc sun.png                                # view the sun map as a heatmap
+vg replay session.mcap garden.asc            # as fast as possible
+vg replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
+vg replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
+vg replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
+vg replay session.mcap garden.asc --ground ground.asc --objects objects.ply
+vg replay session.mcap garden.asc --sun-map sun.asc --sun-energy energy.asc
+vg heatmap sun.asc sun.png                    # view the sun map as a heatmap
 ```
 
 `--sun-map` simulates the current year by default (`--year 2027`, and
 `--sun-step 30` for 30-minute steps). If the session has no GPS, or the walk was
 too short to tell which way the map faces, pass `--lat`/`--lon` and
 `--x-bearing` (compass bearing of the map's +x axis).
+
+`vg replay` (see [Development tools](#development-tools-python--310)) builds
+and runs `vg_replay`; the binary itself is `build/<preset>/vg_replay`.
+
+A recording the app never closed (killed, crashed, out of space) has no index,
+and its last chunk may be cut off. `vg_replay` still reads it, but Foxglove and
+other tools may not. `vg mcap repair` writes a new, indexed copy holding
+everything up to the last complete chunk; the original is left alone:
+
+```sh
+vg mcap repair session.mcap                   # writes session.repaired.mcap
+vg mcap repair session.mcap fixed.mcap        # or name the output (--force to replace it)
+```
 
 The same session opens in [Foxglove](https://foxglove.dev) for inspection.
 In code, `vg::io::SessionReader` plus `vg::io::play()` give the same playback
@@ -198,7 +211,20 @@ pytest tools        # test the tools themselves
 vg schemas          # regenerate src/io/schema_descriptors.cpp after editing schemas/
                     # (needs: pip install -e "tools[schemas]")
 vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a heatmap PNG
+vg replay ...       # run a C++ app from apps/ (here vg_replay), building it first
+vg mcap repair ...  # vg_mcap_repair
 ```
+
+Every C++ app is a `vg` subcommand, so there's no need to find its binary:
+`apps/vg_<name>.cpp` is built as the target `vg_<name>` and runs as `vg <name>`,
+with underscores splitting the name into words (`apps/vg_mcap_repair.cpp` is
+`vg mcap repair`). Adding the file is all a new app needs: CMake and `vg` both
+pick it up, and its first line, `// vg_<name>: what it does`, is its
+`vg --help` entry. Arguments go to the app unchanged, and it runs in the
+current directory, so `vg` works on recordings anywhere. Before each run the
+app is rebuilt (incrementally) in the release build if one is configured, else
+debug; `--vg-preset NAME` picks the build and `--vg-no-build` skips the
+rebuild.
 
 ## License
 
