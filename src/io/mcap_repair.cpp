@@ -1,22 +1,14 @@
 #include "vg_core/io/mcap_repair.hpp"
 
 #include <algorithm>
-#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <mcap/reader.hpp>
 #include <mcap/writer.hpp>
-#include <memory>
 #include <stdexcept>
 #include <unordered_map>
 
 namespace vg::io {
-namespace {
-
-struct FileCloser {
-  void operator()(std::FILE* f) const { std::fclose(f); }
-};
-
-}  // namespace
 
 McapRepairResult repair_mcap(const std::filesystem::path& input,
                              const std::filesystem::path& output) {
@@ -25,11 +17,11 @@ McapRepairResult repair_mcap(const std::filesystem::path& input,
     throw std::runtime_error("mcap repair: output " + output.string() + " is the input file");
   }
 
-  std::unique_ptr<std::FILE, FileCloser> file(std::fopen(input.string().c_str(), "rb"));
+  std::ifstream file(input, std::ios::binary);
   if (!file) {
     throw std::runtime_error("mcap repair: cannot open " + input.string());
   }
-  mcap::FileReader source(file.get());
+  mcap::FileStreamReader source(file);
   std::byte* magic = nullptr;
   if (source.read(&magic, 0, sizeof(mcap::Magic)) != sizeof(mcap::Magic) ||
       std::memcmp(magic, mcap::Magic, sizeof(mcap::Magic)) != 0) {
