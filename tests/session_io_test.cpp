@@ -215,6 +215,37 @@ TEST(SessionIo, ThrowsOnMissingFile) {
   EXPECT_THROW(vg::io::SessionReader("does/not/exist.mcap"), std::runtime_error);
 }
 
+TEST(SessionIo, ReadsUnclosedFileInTimeOrder) {
+  TempFile file("vg_session_unclosed");
+  {
+    vg::io::SessionWriter writer(file.path(), test_info());
+    // Sensors written in batches, so the file is only roughly in time order.
+    for (const int ms : {30, 10, 20, 60, 40, 50}) {
+      vg::ImuSample imu;
+      imu.timestamp = ms * kMs;
+      writer.write(imu);
+    }
+  }
+  // Drop the footer, as when the recorder is killed before close().
+  std::filesystem::resize_file(file.path(), std::filesystem::file_size(file.path()) - 37);
+
+  vg::io::SessionReader reader(file.path());
+  EXPECT_FALSE(reader.indexed());
+  std::vector<vg::Timestamp> times;
+  while (auto m = reader.next()) {
+    times.push_back(vg::io::timestamp_of(*m));
+  }
+  const std::vector<vg::Timestamp> expected = {5 * kMs,  10 * kMs, 20 * kMs, 30 * kMs,
+                                               40 * kMs, 50 * kMs, 60 * kMs};
+  EXPECT_EQ(times, expected);
+}
+
+TEST(SessionIo, ClosedFileIsIndexed) {
+  TempFile file("vg_session_closed");
+  { vg::io::SessionWriter writer(file.path(), test_info()); }
+  EXPECT_TRUE(vg::io::SessionReader(file.path()).indexed());
+}
+
 TEST(SessionPlayer, PacesToRecordedTiming) {
   TempFile file("vg_session_timing");
   {
