@@ -21,6 +21,24 @@ struct Confidence {
 
 using Decoded = std::variant<SessionMessage, Confidence>;
 
+// How far out of log-time order messages may be in a file read without its
+// index. Writers buffer sensors separately (vg_android's IMU arrives in
+// batches up to ~0.5 s behind the camera), so file order is only roughly
+// time order.
+constexpr mcap::Timestamp kReorderWindow = 2'000'000'000;
+
+// True if the file was closed cleanly, so it can be read in time order from
+// its index. A recording cut off before close() (app killed, crash, phone
+// out of space) has its chunks but no summary or footer.
+bool has_message_index(mcap::McapReader& reader) {
+  if (!reader.readSummary(mcap::ReadSummaryMethod::NoFallbackScan).ok()) {
+    return false;
+  }
+  const auto& chunks = reader.chunkIndexes();
+  return std::any_of(chunks.begin(), chunks.end(),
+                     [](const mcap::ChunkIndex& c) { return c.messageIndexLength > 0; });
+}
+
 bool starts_with(std::string_view s, std::string_view prefix) {
   return s.substr(0, prefix.size()) == prefix;
 }
@@ -32,15 +50,47 @@ struct SessionReader::Impl {
   std::optional<mcap::LinearMessageView> view;
   std::optional<mcap::LinearMessageView::Iterator> it;
   std::optional<Decoded> pending;
+  bool indexed = true;
+  // Without an index: decoded messages waiting to be sorted into time order,
+  // and the newest log time seen so far.
+  std::multimap<mcap::Timestamp, Decoded> reorder;
+  mcap::Timestamp newest = 0;
   std::map<std::string, CameraIntrinsics> camera_calibrations;
   std::map<std::string, CameraIntrinsics> depth_calibrations;
 
-  // Next decoded message from the file, or nullopt at the end.
+  // Next decoded message in time order, or nullopt at the end.
   std::optional<Decoded> next_raw() {
+    if (indexed) {
+      return next_in_file();
+    }
+    // Hold messages until nothing older can still turn up, then release the
+    // oldest. Equal log times keep their file order.
+    while (reorder.empty() || newest - reorder.begin()->first < kReorderWindow) {
+      mcap::Timestamp log_time = 0;
+      std::optional<Decoded> decoded = next_in_file(&log_time);
+      if (!decoded) {
+        break;
+      }
+      newest = std::max(newest, log_time);
+      reorder.emplace(log_time, std::move(*decoded));
+    }
+    if (reorder.empty()) {
+      return std::nullopt;
+    }
+    Decoded oldest = std::move(reorder.begin()->second);
+    reorder.erase(reorder.begin());
+    return oldest;
+  }
+
+  // Next decoded message in the order the view yields them.
+  std::optional<Decoded> next_in_file(mcap::Timestamp* log_time = nullptr) {
     while (*it != view->end()) {
       const mcap::MessageView& mv = **it;
       std::optional<Decoded> decoded = decode(
           mv.channel->topic, {reinterpret_cast<const char*>(mv.message.data), mv.message.dataSize});
+      if (log_time != nullptr) {
+        *log_time = mv.message.logTime;
+      }
       ++*it;
       if (decoded) {
         return decoded;
@@ -127,7 +177,11 @@ SessionReader::SessionReader(const std::filesystem::path& path) : impl_(std::mak
     throw std::runtime_error("session: cannot open " + path.string() + ": " + status.message);
   }
   mcap::ReadMessageOptions options;
-  options.readOrder = mcap::ReadMessageOptions::ReadOrder::LogTimeOrder;
+  // A file without an index can only be read front to back; next_raw() puts
+  // it back into time order.
+  impl_->indexed = has_message_index(impl_->reader);
+  options.readOrder = impl_->indexed ? mcap::ReadMessageOptions::ReadOrder::LogTimeOrder
+                                     : mcap::ReadMessageOptions::ReadOrder::FileOrder;
   // Problems (e.g. a file truncated by a crash mid-recording) end reading at
   // the last good message rather than failing the whole session.
   impl_->view.emplace(impl_->reader.readMessages([](const mcap::Status&) {}, options));
@@ -155,6 +209,8 @@ std::optional<std::pair<Timestamp, Timestamp>> SessionReader::time_range() const
   }
   return std::pair{static_cast<Timestamp>(first), static_cast<Timestamp>(last)};
 }
+
+bool SessionReader::indexed() const { return impl_->indexed; }
 
 std::optional<SessionMessage> SessionReader::next() {
   Impl& d = *impl_;

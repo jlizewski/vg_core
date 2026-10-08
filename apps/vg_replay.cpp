@@ -125,6 +125,10 @@ int main(int argc, char** argv) {
     vg::MapBuilder builder(config);
     vg::io::SessionMapper mapper(builder);
     vg::io::SessionReader reader(session_path);
+    if (!reader.indexed()) {
+      std::cerr << "warning: " << session_path
+                << " has no index (the recorder never closed it); reading what was written\n";
+    }
     const bool live = playback.rate > 0.0;
     std::size_t depth_frames = 0;
     std::vector<vg::GpsFix> fixes;
@@ -158,6 +162,11 @@ int main(int argc, char** argv) {
     std::cout << messages << " messages, " << stats.integrated << " depth frames integrated, "
               << stats.skipped_no_pose << " skipped without a pose, " << stats.skipped_tracking
               << " skipped while tracking was lost\n";
+
+    if (depth_frames == 0) {
+      std::cerr << "warning: no depth images in " << session_path
+                << " (no /cam/<name>/depth topic), so the map is empty\n";
+    }
 
     const auto map = builder.height_map();
     vg::save_height_map(map, output_path);
