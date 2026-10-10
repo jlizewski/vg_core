@@ -125,7 +125,7 @@ TEST_F(MapPackageTest, RerunsOneStageFromTheSavedMap) {
 
   // The manifest keeps the surface stage and records the new ground settings.
   const std::string manifest = read_file(dir_ / file::kManifest);
-  EXPECT_NE(manifest.find("\"surface\": {\"cell_size_m\": 0.1524}"), std::string::npos)
+  EXPECT_NE(manifest.find("\"surface\": {\"cell_size_m\": 0.1524, "), std::string::npos)
       << manifest;
   EXPECT_NE(manifest.find("\"ground\": {\"cell_size_m\": 0.1, "), std::string::npos) << manifest;
   EXPECT_NE(manifest.find("\"max_hole_area_m2\": 0,"), std::string::npos) << manifest;

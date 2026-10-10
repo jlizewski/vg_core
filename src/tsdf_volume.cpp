@@ -110,11 +110,36 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
     work.emplace_back(index, &blocks_[index]);
     changed_.insert(index);
   }
+  // Per-pixel weights, when they aren't all 1.
+  std::vector<float> weights;
+  if (config_.quality_weights) {
+    weights.assign(frame.depth.size(), 0.0f);
+    const double reference = config_.weight_reference_depth;
+    for (int v = 0; v < k.height; ++v) {
+      for (int u = 0; u < k.width; ++u) {
+        const std::size_t i = frame.index(u, v);
+        const float d = frame.depth[i];
+        if (!valid_depth(d, config_)) {
+          continue;
+        }
+        double w = (reference / d) * (reference / d);
+        if (!frame.confidence.empty()) {
+          w *= frame.confidence[i] / 255.0;
+        }
+        const double angle = incidence_deg(frame, u, v);
+        if (!std::isnan(angle)) {
+          w *= std::cos(angle * 3.14159265358979323846 / 180.0);
+        }
+        weights[i] = static_cast<float>(w);
+      }
+    }
+  }
+
   const Eigen::Isometry3d camera_from_world = world_from_camera.inverse();
   std::atomic<std::size_t> next{0};
   const auto fuse = [&]() {
     for (std::size_t w = next++; w < work.size(); w = next++) {
-      integrate_block(work[w].first, *work[w].second, frame, camera_from_world);
+      integrate_block(work[w].first, *work[w].second, frame, weights, camera_from_world);
     }
   };
   const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
@@ -132,7 +157,7 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
 }
 
 void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& block,
-                                 const DepthFrame& frame,
+                                 const DepthFrame& frame, const std::vector<float>& weights,
                                  const Eigen::Isometry3d& camera_from_world) {
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
@@ -163,10 +188,14 @@ void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& bloc
         }
         const float tsdf = static_cast<float>(std::min(1.0, sdf / trunc));
 
+        const float sample = weights.empty() ? 1.0f : weights[i];
+        if (sample <= 0.0f) {
+          continue;
+        }
         Voxel& voxel = block[linear_index(local)];
         const float w = voxel.weight;
-        voxel.tsdf = (voxel.tsdf * w + tsdf) / (w + 1.0f);
-        voxel.weight = std::min(w + 1.0f, config_.max_weight);
+        voxel.tsdf = (voxel.tsdf * w + tsdf * sample) / (w + sample);
+        voxel.weight = std::min(w + sample, config_.max_weight);
       }
     }
   }
@@ -263,7 +292,8 @@ void TsdfVolume::append_occupied_voxels(const Eigen::Vector3i& block_index, cons
         const Voxel& v = block[linear_index(local)];
         // Behind a surface, but not saturated: a saturated value next to free
         // space is an occlusion edge, not a surface.
-        if (v.weight <= 0.0f || v.tsdf >= 0.0f || v.tsdf <= -1.0f) {
+        if (v.weight <= 0.0f || v.weight < config_.min_weight || v.tsdf >= 0.0f ||
+            v.tsdf <= -1.0f) {
           continue;
         }
         bool in_front_seen = false;
@@ -294,13 +324,14 @@ void TsdfVolume::append_surface_points(const Eigen::Vector3i& block_index, const
         const Voxel& a = block[linear_index(local)];
         // Saturated values sit at the edge of the truncation band, where a
         // sign flip is an occlusion boundary rather than a surface.
-        if (a.weight <= 0.0f || std::abs(a.tsdf) >= 1.0f) {
+        if (a.weight <= 0.0f || a.weight < config_.min_weight || std::abs(a.tsdf) >= 1.0f) {
           continue;
         }
         for (int axis = 0; axis < 3; ++axis) {
           const Eigen::Vector3i neighbor = origin + local + Eigen::Vector3i::Unit(axis);
           const Voxel* b = find_voxel(neighbor);
-          if (b == nullptr || b->weight <= 0.0f || std::abs(b->tsdf) >= 1.0f ||
+          if (b == nullptr || b->weight <= 0.0f || b->weight < config_.min_weight ||
+              std::abs(b->tsdf) >= 1.0f ||
               (a.tsdf >= 0.0f) == (b->tsdf >= 0.0f)) {
             continue;
           }

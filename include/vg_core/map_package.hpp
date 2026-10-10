@@ -104,6 +104,11 @@ class MapPackage {
   const TsdfVolume& volume() const { return map_.volume; }
   const MapMetadata& metadata() const { return map_.metadata; }
 
+  // Re-tunes how much fused weight a voxel needs to count as part of the map
+  // (TsdfConfig::min_weight; the map's own value by default) for the stages
+  // run after this. Higher drops more floating noise, and more faint detail.
+  void set_min_weight(float min_weight);
+
   // surface.asc: the highest surface point per cell.
   void make_surface(const SurfaceOptions& options = {});
 

@@ -17,6 +17,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +30,7 @@ int usage() {
   std::cerr << "usage: vg_map <package_dir> <stage>... [options]\n"
                "stages: surface, ground, sun, all; layers (ghost surface diagnostic)\n"
                "  --cell M               cell size of the 2D maps (default the package's)\n"
+               "  --min-weight W         fused weight a voxel needs to count (default the map's)\n"
             << vg::app::kStageOptionsHelp;
   return 2;
 }
@@ -43,6 +45,7 @@ int main(int argc, char** argv) {
   const std::vector<std::string> all = {"surface", "ground", "sun"};
   std::vector<std::string> requested;
   vg::app::StageOptions stages;
+  std::optional<float> min_weight;
 
   int i = 2;
   for (; i < argc && std::string(argv[i]).rfind("--", 0) != 0; ++i) {
@@ -67,6 +70,8 @@ int main(int argc, char** argv) {
     const char* text = argv[++i];
     if (arg == "--cell") {
       stages.set_cell_size(std::atof(text));
+    } else if (arg == "--min-weight") {
+      min_weight = static_cast<float>(std::atof(text));
     } else if (!stages.parse(arg, text)) {
       return usage();
     }
@@ -77,6 +82,9 @@ int main(int argc, char** argv) {
 
   try {
     vg::MapPackage package(package_dir, std::cout);
+    if (min_weight) {
+      package.set_min_weight(*min_weight);
+    }
     if (wants("surface")) {
       package.make_surface(stages.surface);
     }

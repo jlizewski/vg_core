@@ -260,6 +260,11 @@ void create_map_package(const std::filesystem::path& dir, const TsdfVolume& volu
 MapPackage::MapPackage(std::filesystem::path dir, std::ostream& log)
     : dir_(std::move(dir)), log_(log), map_(load_map(dir_ / package_file::kMap)) {}
 
+void MapPackage::set_min_weight(float min_weight) {
+  map_.volume.set_min_weight(min_weight);
+  occupied_.reset();
+}
+
 const std::vector<Eigen::Vector3i>& MapPackage::occupied() {
   if (!occupied_) {
     occupied_ = sorted_occupied_voxels(map_.volume);
@@ -273,7 +278,9 @@ void MapPackage::make_surface(const SurfaceOptions& options) {
   const HeightMap map = make_height_map(map_.volume.extract_surface_points(), cell_size);
   save_height_map(map, path(package_file::kSurface));
   update_manifest(dir_, map_.metadata, map_.volume.config().voxel_size, "surface",
-                  StageSettings().add("cell_size_m", cell_size));
+                  StageSettings()
+                      .add("cell_size_m", cell_size)
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight)));
   log_ << "surface: " << map.width << " x " << map.height << " cells -> "
        << package_file::kSurface << " (" << seconds_since(start) << " s)\n";
 }
@@ -301,6 +308,7 @@ void MapPackage::make_ground(const GroundOptions& options) {
   update_manifest(dir_, map_.metadata, voxel_size, "ground",
                   StageSettings()
                       .add("cell_size_m", config.cell_size)
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
                       .add("max_slope", config.max_slope)
                       .add("step_tolerance_m", config.step_tolerance)
                       .add("max_gap_m", config.max_gap)
@@ -371,6 +379,7 @@ bool MapPackage::make_sun(const SunOptions& options) {
   update_manifest(dir_, map_.metadata, voxel_size, "sun",
                   StageSettings()
                       .add("year", options.year)
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
                       .add("step_minutes", options.step_minutes)
                       .add("sample_height_m", config.sample_height)
                       .add("latitude", geo->latitude)
@@ -394,6 +403,7 @@ void MapPackage::make_layers(const SurfaceOptions& options) {
   update_manifest(dir_, map_.metadata, voxel_size, "layers",
                   StageSettings()
                       .add("cell_size_m", cell_size)
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
                       .add("columns", layers.columns)
                       .add("layered_columns", layers.layered_columns)
                       .add("gap_under_0.15_m", layers.by_gap[0])
