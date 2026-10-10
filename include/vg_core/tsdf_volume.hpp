@@ -45,6 +45,13 @@ struct TsdfConfig {
   // blocks it finds are still fused from every pixel, so at coarse voxels a
   // stride of 2 or more loses nothing and saves most of the allocation work.
   int pixel_stride = 1;
+  // Free-space carving: also fuse the existing blocks each depth ray passes
+  // through on its way to the surface, so space a frame sees through is
+  // marked empty. Something mapped from a bad reading (a floating blob, a
+  // ghost) fades out once later frames look through it. Rays are cast from
+  // every carve_stride-th pixel in each direction; carving never allocates.
+  bool carve = false;
+  int carve_stride = 4;
   // Threads that fuse a frame's blocks in parallel; 0 uses all hardware
   // threads. Results are the same for any count.
   int threads = 1;

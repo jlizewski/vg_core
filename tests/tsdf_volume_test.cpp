@@ -242,6 +242,58 @@ TEST(TsdfVolume, MinWeightNeedsRepeatedObservations) {
   EXPECT_GT(once.occupied_voxels().size(), 1000u);
 }
 
+// A frame from above with a bad patch: a blob 0.8 m over the ground, as
+// smeared or hallucinated depth makes. Then views from around it that see
+// the ground through where the blob is.
+std::size_t blob_voxels_after_looking_through(bool carve) {
+  vg::TsdfConfig config;
+  config.voxel_size = 0.05;
+  config.truncation_distance = 0.15;
+  config.carve = carve;
+  vg::TsdfVolume volume(config);
+  const auto above = look_at({0.0, 0.0, 1.5}, {0.0, 0.0, 0.0}, Eigen::Vector3d::UnitY());
+  auto bad = render_depth(Scene{}, above);
+  for (int v = 50; v < 70; ++v) {
+    for (int u = 70; u < 90; ++u) {
+      bad.depth[bad.index(u, v)] = 0.7f;
+    }
+  }
+  volume.integrate(bad, above);
+  for (int i = 0; i < 8; ++i) {
+    const double a = i * 3.14159265358979323846 / 4.0;
+    const Eigen::Vector3d eye(1.2 * std::cos(a), 1.2 * std::sin(a), 1.2);
+    const Eigen::Vector3d through(-1.2 * std::cos(a), -1.2 * std::sin(a), 0.4);
+    const auto pose = look_at(eye, through, Eigen::Vector3d::UnitZ());
+    volume.integrate(render_depth(Scene{}, pose), pose);
+  }
+  std::size_t blob = 0;
+  for (const auto& v : volume.occupied_voxels()) {
+    blob += v.z() * config.voxel_size > 0.4 ? 1 : 0;
+  }
+  return blob;
+}
+
+TEST(TsdfVolume, CarvingRemovesWhatLaterFramesSeeThrough) {
+  EXPECT_GT(blob_voxels_after_looking_through(false), 20u);
+  EXPECT_EQ(blob_voxels_after_looking_through(true), 0u);
+}
+
+TEST(TsdfVolume, CarvingKeepsTheSurface) {
+  vg::TsdfConfig config;
+  config.max_depth = 2.5;
+  config.voxel_size = 0.0762;
+  config.truncation_distance = 3 * config.voxel_size;
+  vg::TsdfVolume plain(config);
+  config.carve = true;
+  vg::TsdfVolume carved(config);
+  fuse_bed(plain);
+  fuse_bed(carved);
+  // The same surface, give or take a few voxels at its edges.
+  const auto a = plain.occupied_voxels().size();
+  const auto b = carved.occupied_voxels().size();
+  EXPECT_NEAR(static_cast<double>(b), static_cast<double>(a), 0.02 * static_cast<double>(a));
+}
+
 TEST(HeightMap, KeepsHighestPointPerCell) {
   const auto map =
       vg::make_height_map({{0.05, 0.05, 1.0}, {0.07, 0.02, 2.0}, {0.25, 0.05, 0.5}}, 0.1);

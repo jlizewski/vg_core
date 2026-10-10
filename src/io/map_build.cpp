@@ -86,6 +86,8 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
       .add("max_incidence_deg", tsdf.max_incidence_deg)
       .add("quality_weights", tsdf.quality_weights)
       .add("min_weight", static_cast<double>(tsdf.min_weight))
+      .add("carve", tsdf.carve)
+      .add("carve_stride", tsdf.carve_stride)
       .add("pixel_stride", tsdf.pixel_stride)
       .add("keyframe_translation_m", config.keyframe_translation)
       .add("keyframe_rotation_deg", config.keyframe_rotation * 180.0 / 3.14159265358979323846)

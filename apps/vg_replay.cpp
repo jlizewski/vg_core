@@ -43,6 +43,9 @@ int usage() {
          "                         90 keeps them)\n"
          "  --weights 0|1          weight readings by confidence, range and angle (default 1)\n"
          "  --min-weight W         fused weight a voxel needs to be mapped (default 0.5)\n"
+         "  --carve 0|1            mark space seen through as empty, erasing floating blobs\n"
+         "                         (default 1)\n"
+         "  --carve-stride N       carve along the rays of every Nth depth pixel (default 4)\n"
          "  --stride N             place blocks from every Nth depth pixel (default 2)\n"
          "  --keyframe-dist M      fuse a frame only after moving this far (default 0: every\n"
          "                         frame; fewer frames build faster but average out less noise)\n"
@@ -67,6 +70,7 @@ int main(int argc, char** argv) {
   build.builder.tsdf.max_incidence_deg = 75.0;
   build.builder.tsdf.quality_weights = true;
   build.builder.tsdf.min_weight = 0.5f;
+  build.builder.tsdf.carve = true;
   build.builder.tsdf.pixel_stride = 2;
   build.builder.tsdf.threads = 0;
   build.builder.keyframe_translation = 0.0;
@@ -100,6 +104,10 @@ int main(int argc, char** argv) {
       build.builder.tsdf.quality_weights = value != 0.0;
     } else if (arg == "--min-weight") {
       build.builder.tsdf.min_weight = static_cast<float>(value);
+    } else if (arg == "--carve") {
+      build.builder.tsdf.carve = value != 0.0;
+    } else if (arg == "--carve-stride") {
+      build.builder.tsdf.carve_stride = static_cast<int>(value);
     } else if (arg == "--stride") {
       build.builder.tsdf.pixel_stride = static_cast<int>(value);
     } else if (arg == "--keyframe-dist") {

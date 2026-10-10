@@ -102,6 +102,34 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
     }
   }
 
+  // Carving: existing blocks between the camera and the truncation band of
+  // each sampled reading. Fusing them marks the voxels the ray sees through
+  // as free space (the projective update gives them +1).
+  if (config_.carve) {
+    const int carve_stride = std::max(1, config_.carve_stride);
+    for (int v = carve_stride / 2; v < k.height; v += carve_stride) {
+      for (int u = carve_stride / 2; u < k.width; u += carve_stride) {
+        const std::size_t i = frame.index(u, v);
+        const float d = frame.depth[i];
+        if (!valid_depth(d, config_) || !confident(frame, i, config_)) {
+          continue;
+        }
+        const Eigen::Vector3d ray((u - k.cx) / k.fx, (v - k.cy) / k.fy, 1.0);
+        // Half a block per step along the ray, in units of depth.
+        const double step = 0.5 * block_edge / ray.norm();
+        Eigen::Vector3i previous(std::numeric_limits<int>::min(), 0, 0);
+        for (double z = config_.min_depth; z < d - trunc; z += step) {
+          const Eigen::Vector3d p = world_from_camera * (ray * z);
+          const Eigen::Vector3i index = (p / block_edge).array().floor().cast<int>();
+          if (index != previous && blocks_.count(index) != 0) {
+            touched.insert(index);
+          }
+          previous = index;
+        }
+      }
+    }
+  }
+
   // Blocks are fused independently, so they can be split across threads.
   // Allocating first keeps the hash map untouched while workers run.
   std::vector<std::pair<Eigen::Vector3i, Block*>> work;
