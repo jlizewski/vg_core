@@ -302,13 +302,43 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
     b = std::min(b, v.z());
   }
 
-  const std::vector<char> ground_column = find_ground_columns(columns, bottom, voxel_size, config);
+  std::vector<char> ground_column = find_ground_columns(columns, bottom, voxel_size, config);
+
+  // Fusion rounds the corner where a wall meets the ground, so just inside a
+  // wall (or a bed, or a trunk) a column can bottom out a voxel or two above
+  // the ground beside it, with the object's top just over it. That bottom is
+  // the object's, not the ground's, and reads high (a lot, at coarse voxels).
+  // Leave such columns out, so the ground there is patched like under any
+  // other object.
+  const VoxelSet occupied(voxels.begin(), voxels.end());
+  const int thickness = std::max(1, max_step_voxels(config, voxel_size, 1.0));
+  const std::vector<char> grown = ground_column;
+  for (std::size_t i = 0; i < columns.cells(); ++i) {
+    if (!grown[i]) {
+      continue;
+    }
+    const Eigen::Vector2i c = columns.cell(i);
+    bool raised = false;
+    for (const auto& d : kNeighbors8) {
+      if (columns.contains(c.x() + d[0], c.y() + d[1])) {
+        const std::size_t n = columns.index(c.x() + d[0], c.y() + d[1]);
+        raised = raised || (grown[n] && bottom[n] < bottom[i]);
+      }
+    }
+    if (!raised) {
+      continue;
+    }
+    for (int k = bottom[i] + thickness + 1; k <= bottom[i] + thickness + 3; ++k) {
+      if (occupied.count({c.x(), c.y(), k}) != 0) {
+        ground_column[i] = 0;
+        break;
+      }
+    }
+  }
 
   // In each ground column, the ground is the run of voxels up from the bottom,
   // a few voxels thick where the surface slopes.
-  const VoxelSet occupied(voxels.begin(), voxels.end());
   VoxelSet ground;
-  const int thickness = std::max(1, max_step_voxels(config, voxel_size, 1.0));
   for (std::size_t i = 0; i < columns.cells(); ++i) {
     if (!ground_column[i]) {
       continue;

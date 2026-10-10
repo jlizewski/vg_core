@@ -14,7 +14,8 @@ def test_discovers_repo_apps():
     found = {app.words: app for app in apps.discover(cli.repo_root())}
     assert found[("replay",)].target == "vg_replay"
     assert found[("mcap", "repair")].target == "vg_mcap_repair"
-    assert found[("replay",)].help.startswith("rebuild a map")
+    assert found[("replay",)].help.startswith("build the full map package")
+    assert found[("map",)].target == "vg_map"
 
 
 def test_match_prefers_longest_words(tmp_path: Path):
@@ -44,14 +45,16 @@ def test_find_binary_checks_multi_config_dirs(tmp_path: Path):
     assert apps.find_binary(tmp_path, "release", "vg_replay") is None
 
 
-def test_choose_preset_prefers_built_then_configured(tmp_path: Path):
-    assert apps.choose_preset(tmp_path, "vg_replay") == "release"
-    for preset in ("debug", "release"):
-        (tmp_path / "build" / preset).mkdir(parents=True)
-        (tmp_path / "build" / preset / "CMakeCache.txt").write_text("")
-    assert apps.choose_preset(tmp_path, "vg_replay") == "release"
-    (tmp_path / "build" / "debug" / apps.binary_name("vg_replay")).write_text("")
-    assert apps.choose_preset(tmp_path, "vg_replay") == "debug"
+def test_package_dir_of(tmp_path: Path):
+    replay = apps.App("vg_replay", ("replay",), "")
+    vg_map = apps.App("vg_map", ("map",), "")
+    repair = apps.App("vg_mcap_repair", ("mcap", "repair"), "")
+    pkg = str(tmp_path)
+    assert apps.package_dir_of(replay, ["s.mcap", pkg, "--year", "2026"]) == tmp_path
+    assert apps.package_dir_of(vg_map, [pkg, "ground"]) == tmp_path
+    assert apps.package_dir_of(replay, ["s.mcap"]) is None
+    assert apps.package_dir_of(replay, ["s.mcap", str(tmp_path / "missing")]) is None
+    assert apps.package_dir_of(repair, ["s.mcap", pkg]) is None
 
 
 def test_main_forwards_app_arguments(monkeypatch: pytest.MonkeyPatch):

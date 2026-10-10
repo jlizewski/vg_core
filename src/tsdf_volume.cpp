@@ -1,7 +1,11 @@
 #include "vg_core/tsdf_volume.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <limits>
+#include <thread>
+#include <utility>
 
 namespace vg {
 namespace {
@@ -60,28 +64,56 @@ void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& wor
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
   const double block_edge = config_.voxel_size * kBlockSize;
+  const int stride = std::max(1, config_.pixel_stride);
 
   // Allocate every block within the truncation band around each depth reading.
   std::unordered_set<Eigen::Vector3i, IndexHash> touched;
-  for (int v = 0; v < k.height; ++v) {
-    for (int u = 0; u < k.width; ++u) {
+  for (int v = 0; v < k.height; v += stride) {
+    for (int u = 0; u < k.width; u += stride) {
       const std::size_t i = frame.index(u, v);
       const float d = frame.depth[i];
       if (!valid_depth(d, config_) || !confident(frame, i, config_)) {
         continue;
       }
       const Eigen::Vector3d ray((u - k.cx) / k.fx, (v - k.cy) / k.fy, 1.0);
+      Eigen::Vector3i previous(std::numeric_limits<int>::min(), 0, 0);
       for (double z = d - trunc; z <= d + trunc; z += config_.voxel_size) {
         const Eigen::Vector3d p = world_from_camera * (ray * z);
-        touched.insert((p / block_edge).array().floor().cast<int>());
+        const Eigen::Vector3i index = (p / block_edge).array().floor().cast<int>();
+        if (index != previous) {  // Consecutive samples are mostly in one block.
+          touched.insert(index);
+          previous = index;
+        }
       }
     }
   }
 
-  const Eigen::Isometry3d camera_from_world = world_from_camera.inverse();
+  // Blocks are fused independently, so they can be split across threads.
+  // Allocating first keeps the hash map untouched while workers run.
+  std::vector<std::pair<Eigen::Vector3i, Block*>> work;
+  work.reserve(touched.size());
   for (const Eigen::Vector3i& index : touched) {
-    integrate_block(index, blocks_[index], frame, camera_from_world);
+    work.emplace_back(index, &blocks_[index]);
     changed_.insert(index);
+  }
+  const Eigen::Isometry3d camera_from_world = world_from_camera.inverse();
+  std::atomic<std::size_t> next{0};
+  const auto fuse = [&]() {
+    for (std::size_t w = next++; w < work.size(); w = next++) {
+      integrate_block(work[w].first, *work[w].second, frame, camera_from_world);
+    }
+  };
+  const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
+  unsigned threads = config_.threads > 0 ? static_cast<unsigned>(config_.threads) : hardware;
+  // Starting threads costs about as much as fusing a few dozen blocks.
+  threads = std::min<unsigned>(threads, static_cast<unsigned>(work.size() / 32 + 1));
+  std::vector<std::thread> workers;
+  for (unsigned t = 1; t < threads; ++t) {
+    workers.emplace_back(fuse);
+  }
+  fuse();
+  for (auto& worker : workers) {
+    worker.join();
   }
 }
 
@@ -124,6 +156,30 @@ void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& bloc
       }
     }
   }
+}
+
+std::vector<Eigen::Vector3i> TsdfVolume::block_indices() const {
+  std::vector<Eigen::Vector3i> indices;
+  indices.reserve(blocks_.size());
+  for (const auto& entry : blocks_) {
+    indices.push_back(entry.first);
+  }
+  std::sort(indices.begin(), indices.end(), [](const Eigen::Vector3i& a, const Eigen::Vector3i& b) {
+    if (a.z() != b.z()) return a.z() < b.z();
+    if (a.y() != b.y()) return a.y() < b.y();
+    return a.x() < b.x();
+  });
+  return indices;
+}
+
+const TsdfVolume::Block* TsdfVolume::find_block(const Eigen::Vector3i& index) const {
+  const auto it = blocks_.find(index);
+  return it == blocks_.end() ? nullptr : &it->second;
+}
+
+TsdfVolume::Block& TsdfVolume::insert_block(const Eigen::Vector3i& index) {
+  changed_.insert(index);
+  return blocks_[index];
 }
 
 std::optional<double> TsdfVolume::distance_at(const Eigen::Vector3d& point) const {

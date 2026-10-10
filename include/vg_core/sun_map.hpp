@@ -56,6 +56,10 @@ struct SunMap {
 SunMap compute_sun_map(const GroundMap& ground, const std::vector<Eigen::Vector3i>& voxels,
                        double voxel_size, const GeoReference& geo, const SunMapConfig& config);
 
+// The same over a ground height map alone, e.g. one loaded from a file.
+SunMap compute_sun_map(const HeightMap& ground, const std::vector<Eigen::Vector3i>& voxels,
+                       double voxel_size, const GeoReference& geo, const SunMapConfig& config);
+
 // The simulated period covering one calendar year (UTC), hourly by default.
 SunMapConfig sun_map_config_for_year(int year, double time_step = 3600.0);
 

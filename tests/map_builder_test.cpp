@@ -279,6 +279,27 @@ TEST(MapBuilder, FusesOnlyKeyframesLiveAndTheRestLater) {
   expect_close_map(keyframed.height_map(), every_frame.height_map());
 }
 
+TEST(MapBuilder, CanDropNonKeyframes) {
+  const auto poses = slow_walk(16, 0.05);
+  vg::MapBuilderConfig config = test_config();
+  config.keyframe_translation = 0.2;
+  config.drop_non_keyframes = true;
+  vg::MapBuilder builder(config);
+
+  vg::Timestamp t = 0;
+  for (const auto& pose : poses) {
+    builder.add_pose(pose_at(t, pose));
+    builder.add_depth("rgb", depth_at(t, pose));
+    t += 100 * kMs;
+  }
+  builder.flush();
+
+  EXPECT_EQ(builder.stats().integrated, 4u);
+  EXPECT_EQ(builder.stats().dropped, 12u);
+  EXPECT_EQ(builder.stats().deferred, 0u);
+  EXPECT_EQ(builder.deferred_frames(), 0u);
+}
+
 TEST(MapBuilder, TurningInPlaceMakesKeyframes) {
   vg::MapBuilderConfig config = test_config();
   config.keyframe_translation = 0.2;

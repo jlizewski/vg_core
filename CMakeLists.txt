@@ -30,10 +30,12 @@ add_library(vg_core
   src/height_map_io.cpp
   src/live_height_map.cpp
   src/map_builder.cpp
+  src/map_package.cpp
   src/solar.cpp
   src/sun_map.cpp
   src/tsdf_volume.cpp
   src/voxel_map_io.cpp
+  src/volume_io.cpp
   src/version.cpp)
 add_library(vg_core::vg_core ALIAS vg_core)
 
@@ -57,6 +59,7 @@ target_include_directories(vg_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 if(VG_CORE_BUILD_IO)
   include(cmake/IoDependencies.cmake)
   add_library(vg_core_io
+    src/io/map_build.cpp
     src/io/mcap_impl.cpp
     src/io/mcap_repair.cpp
     src/io/messages.cpp

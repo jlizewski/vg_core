@@ -26,6 +26,13 @@ struct TsdfConfig {
   std::uint8_t min_confidence = 0;
   // Cap on the per-voxel weight, so the map can still adapt to change.
   float max_weight = 64.0f;
+  // Only every pixel_stride-th pixel in each direction places new blocks. The
+  // blocks it finds are still fused from every pixel, so at coarse voxels a
+  // stride of 2 or more loses nothing and saves most of the allocation work.
+  int pixel_stride = 1;
+  // Threads that fuse a frame's blocks in parallel; 0 uses all hardware
+  // threads. Results are the same for any count.
+  int threads = 1;
 };
 
 // Truncated signed distance field over a sparse voxel grid (voxel hashing).
@@ -35,6 +42,13 @@ struct TsdfConfig {
 class TsdfVolume {
  public:
   static constexpr int kBlockSize = 8;
+
+  struct Voxel {
+    float tsdf = 0.0f;  // Normalized to [-1, 1] by the truncation distance.
+    float weight = 0.0f;
+  };
+  // Voxel (x, y, z) of a block is at [(z * kBlockSize + y) * kBlockSize + x].
+  using Block = std::array<Voxel, kBlockSize * kBlockSize * kBlockSize>;
 
   explicit TsdfVolume(const TsdfConfig& config = {});
 
@@ -76,12 +90,16 @@ class TsdfVolume {
 
   std::size_t num_blocks() const { return blocks_.size(); }
 
+  // Indices of all allocated blocks, sorted (by z, then y, then x).
+  std::vector<Eigen::Vector3i> block_indices() const;
+
+  // Raw block access, e.g. for saving and loading a volume. find_block() returns
+  // nullptr if the block doesn't exist; insert_block() creates it (empty) if
+  // needed.
+  const Block* find_block(const Eigen::Vector3i& index) const;
+  Block& insert_block(const Eigen::Vector3i& index);
+
  private:
-  struct Voxel {
-    float tsdf = 0.0f;  // Normalized to [-1, 1] by the truncation distance.
-    float weight = 0.0f;
-  };
-  using Block = std::array<Voxel, kBlockSize * kBlockSize * kBlockSize>;
 
   struct IndexHash {
     std::size_t operator()(const Eigen::Vector3i& i) const;
