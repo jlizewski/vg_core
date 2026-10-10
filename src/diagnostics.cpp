@@ -11,26 +11,6 @@ bool valid_depth(float d) { return std::isfinite(d) && d > 0.0f; }
 
 }  // namespace
 
-bool is_depth_edge(const DepthFrame& frame, int u, int v, double ratio) {
-  const CameraIntrinsics& k = frame.intrinsics;
-  const float d = frame.depth[frame.index(u, v)];
-  const double limit = ratio * d;
-  for (int dv = -1; dv <= 1; ++dv) {
-    for (int du = -1; du <= 1; ++du) {
-      const int nu = u + du;
-      const int nv = v + dv;
-      if ((du == 0 && dv == 0) || nu < 0 || nv < 0 || nu >= k.width || nv >= k.height) {
-        continue;
-      }
-      const float n = frame.depth[frame.index(nu, nv)];
-      if (valid_depth(n) && std::abs(n - d) > limit) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
 PoseTrackStats analyze_pose_track(const std::vector<PoseStamped>& poses,
                                   const PoseJumpConfig& config) {
   PoseTrackStats stats;

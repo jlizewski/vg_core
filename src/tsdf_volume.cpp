@@ -7,6 +7,8 @@
 #include <thread>
 #include <utility>
 
+#include "vg_core/depth_filter.hpp"
+
 namespace vg {
 namespace {
 
@@ -60,7 +62,19 @@ const TsdfVolume::Voxel* TsdfVolume::find_voxel(const Eigen::Vector3i& voxel) co
   return &it->second[linear_index(voxel - block * kBlockSize)];
 }
 
-void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& world_from_camera) {
+void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world_from_camera) {
+  // Readings the filters reject are removed up front, so they neither place
+  // blocks nor update the voxels that project onto them.
+  std::optional<DepthFrame> filtered;
+  if (config_.edge_ratio > 0.0 || config_.max_incidence_deg < 90.0) {
+    DepthFilterConfig filter;
+    filter.min_depth = config_.min_depth;
+    filter.max_depth = config_.max_depth;
+    filter.edge_ratio = config_.edge_ratio;
+    filter.max_incidence_deg = config_.max_incidence_deg;
+    filtered = filter_depth(raw, filter);
+  }
+  const DepthFrame& frame = filtered ? *filtered : raw;
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
   const double block_edge = config_.voxel_size * kBlockSize;

@@ -82,6 +82,8 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
       .add("truncation_m", tsdf.truncation_distance)
       .add("min_depth_m", tsdf.min_depth)
       .add("max_depth_m", tsdf.max_depth)
+      .add("edge_ratio", tsdf.edge_ratio)
+      .add("max_incidence_deg", tsdf.max_incidence_deg)
       .add("pixel_stride", tsdf.pixel_stride)
       .add("keyframe_translation_m", config.keyframe_translation)
       .add("keyframe_rotation_deg", config.keyframe_rotation * 180.0 / 3.14159265358979323846)

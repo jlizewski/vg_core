@@ -24,6 +24,12 @@ struct TsdfConfig {
   double max_depth = 5.0;
   // Pixels with confidence below this are ignored (when confidence is present).
   std::uint8_t min_confidence = 0;
+  // Pixels on a depth edge (a neighbor differs by more than this fraction of
+  // the depth) are ignored; 0 keeps them. See depth_filter.hpp.
+  double edge_ratio = 0.0;
+  // Surfaces seen more than this far from head-on, in degrees, are ignored;
+  // 90 keeps them all.
+  double max_incidence_deg = 90.0;
   // Cap on the per-voxel weight, so the map can still adapt to change.
   float max_weight = 64.0f;
   // Only every pixel_stride-th pixel in each direction places new blocks. The

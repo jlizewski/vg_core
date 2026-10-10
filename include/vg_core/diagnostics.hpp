@@ -10,15 +10,11 @@
 #include <cstddef>
 #include <vector>
 
+#include "vg_core/depth_filter.hpp"
 #include "vg_core/height_map.hpp"
 #include "vg_core/sensor_data.hpp"
 
 namespace vg {
-
-// Whether pixel (u, v) of a depth image sits on a depth discontinuity: a valid
-// 8-neighbor differs from it by more than ratio times its depth. Depth at
-// such pixels is often smeared between the two surfaces ("flying pixels").
-bool is_depth_edge(const DepthFrame& frame, int u, int v, double ratio);
 
 struct PoseJumpConfig {
   // Motion between consecutive poses faster than a hand-held phone moves.

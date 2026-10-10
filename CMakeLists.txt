@@ -23,6 +23,7 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
 add_library(vg_core
+  src/depth_filter.cpp
   src/depth_spool.cpp
   src/diagnostics.cpp
   src/geo_reference.cpp

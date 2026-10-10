@@ -36,7 +36,11 @@ int usage() {
          "  --resolution M         cell size of the 2D maps (default 0.1524 = 6 in)\n"
          "  --voxel M              3D voxel size (default resolution / 2)\n"
          "  --trunc M              TSDF truncation distance (default 3 voxels)\n"
-         "  --max-depth M          ignore depth readings farther than this (default 5)\n"
+         "  --max-depth M          ignore depth readings farther than this (default 3.5)\n"
+         "  --edge-ratio R         ignore depth edges: a jump to a neighbor of more than R x\n"
+         "                         depth (default 0.05; 0 keeps them)\n"
+         "  --max-angle DEG        ignore surfaces seen more than this from head-on (default 75;\n"
+         "                         90 keeps them)\n"
          "  --stride N             place blocks from every Nth depth pixel (default 2)\n"
          "  --keyframe-dist M      fuse a frame only after moving this far (default 0.05)\n"
          "  --keyframe-angle DEG   ... or turning this much (default 5); both 0 fuse every "
@@ -56,6 +60,9 @@ int main(int argc, char** argv) {
   const std::string package_dir = argv[2];
 
   vg::io::BuildOptions build;
+  build.builder.tsdf.max_depth = 3.5;
+  build.builder.tsdf.edge_ratio = 0.05;
+  build.builder.tsdf.max_incidence_deg = 75.0;
   build.builder.tsdf.pixel_stride = 2;
   build.builder.tsdf.threads = 0;
   build.builder.keyframe_translation = 0.05;
@@ -81,6 +88,10 @@ int main(int argc, char** argv) {
       trunc = value;
     } else if (arg == "--max-depth") {
       build.builder.tsdf.max_depth = value;
+    } else if (arg == "--edge-ratio") {
+      build.builder.tsdf.edge_ratio = value;
+    } else if (arg == "--max-angle") {
+      build.builder.tsdf.max_incidence_deg = value;
     } else if (arg == "--stride") {
       build.builder.tsdf.pixel_stride = static_cast<int>(value);
     } else if (arg == "--keyframe-dist") {
