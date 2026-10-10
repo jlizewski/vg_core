@@ -14,7 +14,9 @@
 // The sun stage needs to know where the map is: from the session's GPS, or
 // --lat/--lon. Without either it's skipped and the rest is still written.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -37,12 +39,15 @@ int usage() {
          "  --voxel M              3D voxel size (default resolution / 2)\n"
          "  --trunc M              TSDF truncation distance (default 3 voxels)\n"
          "  --max-depth M          ignore depth readings farther than this (default 3.5)\n"
+         "  --min-confidence C     ignore readings less confident than this, 0-255, when the\n"
+         "                         depth has confidence (default 0)\n"
          "  --edge-ratio R         ignore depth edges: a jump to a neighbor of more than R x\n"
          "                         depth (default 0.05; 0 keeps them)\n"
          "  --max-angle DEG        ignore surfaces seen more than this from head-on (default 75;\n"
          "                         90 keeps them)\n"
          "  --weights 0|1          weight readings by confidence, range and angle (default 1)\n"
-         "  --min-weight W         fused weight a voxel needs to be mapped (default 0.5)\n"
+         "  --min-weight W         fused weight a voxel needs to be mapped (default 0.05 for\n"
+         "                         depth with confidence, else 0.5)\n"
          "  --carve 0|1            mark space seen through as empty, erasing floating blobs\n"
          "                         (default 1)\n"
          "  --carve-stride N       carve along the rays of every Nth depth pixel (default 4)\n"
@@ -73,7 +78,6 @@ int main(int argc, char** argv) {
   build.builder.tsdf.edge_ratio = 0.05;
   build.builder.tsdf.max_incidence_deg = 75.0;
   build.builder.tsdf.quality_weights = true;
-  build.builder.tsdf.min_weight = 0.5f;
   build.builder.tsdf.carve = true;
   build.builder.tsdf.pixel_stride = 2;
   build.builder.tsdf.threads = 0;
@@ -100,6 +104,9 @@ int main(int argc, char** argv) {
       trunc = value;
     } else if (arg == "--max-depth") {
       build.builder.tsdf.max_depth = value;
+    } else if (arg == "--min-confidence") {
+      build.builder.tsdf.min_confidence =
+          static_cast<std::uint8_t>(std::clamp(value, 0.0, 255.0));
     } else if (arg == "--edge-ratio") {
       build.builder.tsdf.edge_ratio = value;
     } else if (arg == "--max-angle") {
@@ -107,7 +114,7 @@ int main(int argc, char** argv) {
     } else if (arg == "--weights") {
       build.builder.tsdf.quality_weights = value != 0.0;
     } else if (arg == "--min-weight") {
-      build.builder.tsdf.min_weight = static_cast<float>(value);
+      build.min_weight = static_cast<float>(value);
     } else if (arg == "--carve") {
       build.builder.tsdf.carve = value != 0.0;
     } else if (arg == "--carve-stride") {

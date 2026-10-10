@@ -34,7 +34,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 8> kFiles = {{
+constexpr std::array<FileInfo, 9> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -43,6 +43,8 @@ constexpr std::array<FileInfo, 8> kFiles = {{
     {package_file::kSunHours, "h", "Hours of direct sun per ground cell over the year"},
     {package_file::kSunEnergy, "kWh/m^2",
      "Clear-sky direct solar energy per ground cell over the year"},
+    {package_file::kTrajectory, "s, m",
+     "Path of the depth camera while mapping: time from the first reading, x, y, z"},
     {package_file::kLayers, "m",
      "Diagnostic: gap from the lowest surface to a second one above it (ghosts if small)"},
 }};

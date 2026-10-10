@@ -11,6 +11,7 @@
 //   sun_hours.asc   hours of direct sun per cell           <- sun stage
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
 //   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
+//   trajectory.csv  the camera's path while mapping (t, x, y, z)  <- build
 //   manifest.json   what each file is, and the settings each stage last ran with
 //
 // The 3D map is the core: it is built once from the recording (see
@@ -41,6 +42,7 @@ inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
 inline constexpr const char* kLayers = "layers.asc";
+inline constexpr const char* kTrajectory = "trajectory.csv";
 inline constexpr const char* kManifest = "manifest.json";
 }  // namespace package_file
 

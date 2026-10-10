@@ -154,6 +154,7 @@ garden/
   objects.ply      everything on or over the ground
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
+  trajectory.csv   the camera's path while mapping (t, x, y, z)
   manifest.json    what each file is, and the settings each stage last ran with
   *.png            previews of the .asc maps
 ```
@@ -183,7 +184,10 @@ lists every option):
   nearly edge-on (`--max-angle`) are dropped.
 - **Weighted fusion:** each reading counts by its confidence, 1/range² and
   viewing angle (`--weights`), and a voxel needs a minimum fused weight to be
-  mapped (`--min-weight`, re-tunable later with `vg map --min-weight`).
+  mapped (`--min-weight`, re-tunable later with `vg map --min-weight`). The
+  default suits the depth: 0.05 for raw depth with confidence (most of
+  ARCore's raw readings are low confidence, so weigh little), 0.5 for
+  smoothed depth without it. `--min-confidence` drops readings outright.
 - **Free-space carving:** space a frame sees through is marked empty, so a
   blob from a bad reading fades out (`--carve`).
 - **Tracking jumps:** when ARCore snaps its pose to correct drift, the rest of
