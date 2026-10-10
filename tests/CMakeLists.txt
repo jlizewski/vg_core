@@ -24,6 +24,7 @@ add_executable(vg_core_tests
   height_map_io_test.cpp
   map_builder_test.cpp
   map_package_test.cpp
+  pose_jumps_test.cpp
   solar_test.cpp
   sun_map_test.cpp
   tsdf_volume_test.cpp

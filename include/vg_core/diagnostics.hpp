@@ -12,20 +12,10 @@
 
 #include "vg_core/depth_filter.hpp"
 #include "vg_core/height_map.hpp"
+#include "vg_core/pose_jumps.hpp"
 #include "vg_core/sensor_data.hpp"
 
 namespace vg {
-
-struct PoseJumpConfig {
-  // Motion between consecutive poses faster than a hand-held phone moves.
-  double max_speed = 2.0;          // m/s
-  double max_angular_speed = 3.0;  // rad/s
-  // Jumps smaller than these are ignored, however short the interval.
-  double min_translation = 0.03;  // m
-  double min_rotation = 0.05;     // rad
-  // Consecutive poses further apart than this are a gap, not a jump.
-  Timestamp max_gap = 500'000'000;
-};
 
 struct PoseJump {
   Timestamp timestamp = 0;  // Of the pose after the jump.

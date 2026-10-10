@@ -33,6 +33,7 @@ add_library(vg_core
   src/live_height_map.cpp
   src/map_builder.cpp
   src/map_package.cpp
+  src/pose_jumps.cpp
   src/solar.cpp
   src/sun_map.cpp
   src/tsdf_volume.cpp

@@ -1,6 +1,7 @@
 #include "vg_core/io/map_build.hpp"
 
 #include <chrono>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -8,6 +9,7 @@
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
 #include "vg_core/map_package.hpp"
+#include "vg_core/pose_jumps.hpp"
 
 namespace vg::io {
 
@@ -30,14 +32,34 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
   std::size_t depth_frames = 0;
   std::vector<GpsFix> fixes;
   std::vector<PoseStamped> poses;
+  std::optional<Timestamp> first_reading;
+  PoseJumpFilter jumps;
+  std::size_t outside_window = 0;
   const std::size_t messages = play(
       reader,
       [&](const SessionMessage& m) {
+        const bool sensor = std::holds_alternative<PoseStamped>(m) ||
+                            std::holds_alternative<DepthImage>(m) ||
+                            std::holds_alternative<ImuSample>(m);
+        if (sensor && !first_reading) {
+          first_reading = timestamp_of(m);
+        }
+        if (std::holds_alternative<DepthImage>(m) && first_reading) {
+          const double t = static_cast<double>(timestamp_of(m) - *first_reading) * 1e-9;
+          if (t < options.from || t > options.to) {
+            ++outside_window;
+            return true;
+          }
+        }
+        if (const auto* pose = std::get_if<PoseStamped>(&m)) {
+          const PoseStamped corrected = options.remove_pose_jumps ? jumps.correct(*pose) : *pose;
+          mapper.handle(SessionMessage(corrected));
+          poses.push_back(corrected);
+          return true;
+        }
         mapper.handle(m);
         if (const auto* fix = std::get_if<GpsFix>(&m)) {
           fixes.push_back(*fix);
-        } else if (const auto* pose = std::get_if<PoseStamped>(&m)) {
-          poses.push_back(*pose);
         } else if (std::holds_alternative<DepthImage>(m)) {
           ++depth_frames;
           // When watching it replay live, refresh the live height map every 10
@@ -61,6 +83,13 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
       << " integrated, " << stats.dropped << " dropped (not keyframes), " << stats.skipped_no_pose
       << " without a pose, " << stats.skipped_tracking << " while tracking was lost (" << seconds
       << " s)\n";
+  if (jumps.jumps() > 0) {
+    log << "undid " << jumps.jumps() << " tracking jumps (the tracker snapping its pose)\n";
+  }
+  if (outside_window > 0) {
+    log << outside_window << " depth frames outside " << options.from << " to " << options.to
+        << " s left out\n";
+  }
   if (depth_frames == 0) {
     log << "warning: no depth images in " << session.string()
         << " (no /cam/<name>/depth topic), so the map is empty\n";
@@ -98,6 +127,10 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
       .add("frames_without_pose", stats.skipped_no_pose)
       .add("frames_tracking_lost", stats.skipped_tracking)
       .add("gps_fixes", fixes.size())
+      .add("remove_pose_jumps", options.remove_pose_jumps)
+      .add("pose_jumps_undone", jumps.jumps())
+      .add("from_s", options.from)
+      .add("to_s", options.to)
       .add("seconds", seconds);
   create_map_package(dir, builder.volume(), metadata, settings, log);
 }

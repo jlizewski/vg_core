@@ -51,6 +51,10 @@ int usage() {
          "                         frame; fewer frames build faster but average out less noise)\n"
          "  --keyframe-angle DEG   ... or turning this much (default 0)\n"
          "  --rate R               playback speed: 0 as fast as possible (default), 1 real time\n"
+         "  --fix-jumps 0|1        undo the tracker's pose jumps, which map as ghost copies\n"
+         "                         (default 1)\n"
+         "  --from S --to S        fuse only depth taken in this window, in seconds from the\n"
+         "                         first sensor reading (times as vg mcap stats prints them)\n"
       << vg::app::kStageOptionsHelp;
   return 2;
 }
@@ -114,6 +118,12 @@ int main(int argc, char** argv) {
       build.builder.keyframe_translation = value;
     } else if (arg == "--keyframe-angle") {
       build.builder.keyframe_rotation = value * kDegree;
+    } else if (arg == "--fix-jumps") {
+      build.remove_pose_jumps = value != 0.0;
+    } else if (arg == "--from") {
+      build.from = value;
+    } else if (arg == "--to") {
+      build.to = value;
     } else if (arg == "--rate") {
       build.rate = value;
     } else if (!stages.parse(arg, text)) {

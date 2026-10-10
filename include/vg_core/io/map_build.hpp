@@ -4,6 +4,7 @@
 // recorded session into the 3D map, which every other stage is derived from.
 
 #include <filesystem>
+#include <limits>
 #include <ostream>
 
 #include "vg_core/map_builder.hpp"
@@ -17,6 +18,14 @@ struct BuildOptions {
   // Playback speed: 0 as fast as possible, 1 real time printing the map's
   // progress as it grows.
   double rate = 0.0;
+  // Undo the tracker's pose jumps (see pose_jumps.hpp) before mapping, so
+  // the parts of the walk on either side of one don't map as ghost copies.
+  bool remove_pose_jumps = true;
+  // Only depth taken in this window is fused, in seconds from the session's
+  // first sensor reading; e.g. to build the parts of a walk on either side
+  // of a tracking jump and compare them. Poses, GPS etc. are always read.
+  double from = 0.0;
+  double to = std::numeric_limits<double>::infinity();
 };
 
 // Rebuilds the 3D map from the session and starts a map package in dir with
