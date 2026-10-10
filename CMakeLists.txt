@@ -37,6 +37,7 @@ add_library(vg_core
   src/solar.cpp
   src/sun_map.cpp
   src/tsdf_volume.cpp
+  src/voxel_cleanup.cpp
   src/voxel_map_io.cpp
   src/volume_io.cpp
   src/version.cpp)

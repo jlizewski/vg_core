@@ -4,7 +4,7 @@
 // the maps derived from it.
 //
 //   map.vgm         the 3D map (TSDF volume + geo-reference), see volume_io.hpp
-//   voxels.ply      its occupied voxels, for viewing
+//   voxels.ply      its occupied voxels, for viewing        <- voxels stage
 //   surface.asc     top surface height per cell (m)        <- surface stage
 //   ground.asc      bare ground height per cell (m)        <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
@@ -87,8 +87,8 @@ struct SunOptions {
 };
 
 // Starts a package in dir (created if needed) from a freshly built 3D map:
-// clears any earlier package there, writes map.vgm and voxels.ply, and a new
-// manifest recording build_settings.
+// clears any earlier package there, writes map.vgm and a new manifest
+// recording build_settings.
 void create_map_package(const std::filesystem::path& dir, const TsdfVolume& volume,
                         const MapMetadata& metadata, const StageSettings& build_settings,
                         std::ostream& log);
@@ -108,6 +108,15 @@ class MapPackage {
   // (TsdfConfig::min_weight; the map's own value by default) for the stages
   // run after this. Higher drops more floating noise, and more faint detail.
   void set_min_weight(float min_weight);
+
+  // Specks: groups of voxels connected to nothing else, smaller than this
+  // many cubic meters, are left out of every stage run after this (0 keeps
+  // them). They're mostly left by noisy depth.
+  void set_min_blob_volume(double volume);
+  static constexpr double kDefaultMinBlobVolume = 0.01;
+
+  // voxels.ply: the occupied voxels, for viewing.
+  void make_voxels();
 
   // surface.asc: the highest surface point per cell.
   void make_surface(const SurfaceOptions& options = {});
@@ -132,6 +141,9 @@ class MapPackage {
   std::ostream& log_;
   SavedMap map_;
   std::optional<std::vector<Eigen::Vector3i>> occupied_;
+  // Voxels left out as specks, for the stages that work from the TSDF.
+  std::vector<Eigen::Vector3i> specks_;
+  double min_blob_volume_ = kDefaultMinBlobVolume;
 };
 
 // Rewrites dir's manifest.json, recording settings for stage (replacing what

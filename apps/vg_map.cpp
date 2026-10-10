@@ -2,7 +2,7 @@
 //
 //   vg_map <package_dir> <stage>... [options]
 //
-// Stages: surface, ground, sun, or all (the three, in that order), and the
+// Stages: voxels, surface, ground, sun, or all (the four, in that order), and the
 // diagnostic layers (where surfaces are stacked: ghosts). Each reads
 // the package's map.vgm (and sun reads ground.asc), so tweaking how a map is
 // derived doesn't need the recording, e.g.
@@ -28,7 +28,7 @@ namespace {
 
 int usage() {
   std::cerr << "usage: vg_map <package_dir> <stage>... [options]\n"
-               "stages: surface, ground, sun, all; layers (ghost surface diagnostic)\n"
+               "stages: voxels, surface, ground, sun, all; layers (ghost surface diagnostic)\n"
                "  --cell M               cell size of the 2D maps (default the package's)\n"
                "  --min-weight W         fused weight a voxel needs to count (default the map's)\n"
             << vg::app::kStageOptionsHelp;
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     return usage();
   }
   const std::string package_dir = argv[1];
-  const std::vector<std::string> all = {"surface", "ground", "sun"};
+  const std::vector<std::string> all = {"voxels", "surface", "ground", "sun"};
   std::vector<std::string> requested;
   vg::app::StageOptions stages;
   std::optional<float> min_weight;
@@ -84,6 +84,10 @@ int main(int argc, char** argv) {
     vg::MapPackage package(package_dir, std::cout);
     if (min_weight) {
       package.set_min_weight(*min_weight);
+    }
+    stages.apply(package);
+    if (wants("voxels")) {
+      package.make_voxels();
     }
     if (wants("surface")) {
       package.make_surface(stages.surface);

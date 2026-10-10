@@ -168,18 +168,31 @@ vg map garden/ sun --x-bearing 15            # fix the map's heading
 vg map garden/ all --cell 0.1                # every 2D map at 10 cm
 ```
 
-The stages are `surface`, `ground` (also writes `objects.ply`) and `sun`, which
-reads `ground.asc`, so re-run `sun` after `ground`. In code they're
+The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`) and
+`sun`, which reads `ground.asc`, so re-run `sun` after `ground`. In code they're
 `vg::MapPackage` ([map_package.hpp](include/vg_core/map_package.hpp)), and the
 build stage is `vg::io::build_map_package()`.
 
 `--resolution` (default 6 in, 0.1524 m) is the cell size of the 2D maps; the
 voxels are half that (`--voxel`) so thin things like stems and posts still
-show up. To keep replay fast, only frames taken after the phone has moved
-5 cm or turned 5° are fused (`--keyframe-dist`, `--keyframe-angle`; 0 for
-every frame), and blocks are placed from every other depth pixel (`--stride`).
-`vg replay --help` lists every option. A ~1.5 GB, 35 m recording takes about
-10 s (release build).
+show up. Phone depth is noisy, so the build cleans it up (`vg replay --help`
+lists every option):
+
+- **Depth filtering:** readings beyond 3.5 m (`--max-depth`), on depth edges
+  where they smear between two surfaces (`--edge-ratio`), and of surfaces seen
+  nearly edge-on (`--max-angle`) are dropped.
+- **Weighted fusion:** each reading counts by its confidence, 1/range² and
+  viewing angle (`--weights`), and a voxel needs a minimum fused weight to be
+  mapped (`--min-weight`, re-tunable later with `vg map --min-weight`).
+- **Free-space carving:** space a frame sees through is marked empty, so a
+  blob from a bad reading fades out (`--carve`).
+- **Tracking jumps:** when ARCore snaps its pose to correct drift, the rest of
+  the walk is moved back into line (`--fix-jumps`); otherwise the ground
+  before and after a snap maps as two ghost layers.
+- **Specks:** groups of voxels on their own smaller than 0.01 m³ are left out
+  of every map (`--min-blob`, for `vg replay` and `vg map`).
+
+A ~1.5 GB, 5 minute, 35 m recording takes about 20 s (release build).
 
 `.asc` files are ESRI ASCII grids: plain text, a six-line header (size,
 lower-left corner, cell size, no-data value) and then one value per cell, top

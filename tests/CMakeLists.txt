@@ -30,6 +30,7 @@ add_executable(vg_core_tests
   tsdf_volume_test.cpp
   version_test.cpp
   volume_io_test.cpp
+  voxel_cleanup_test.cpp
   voxel_map_io_test.cpp)
 target_link_libraries(vg_core_tests PRIVATE vg_core::vg_core GTest::gtest_main)
 vg_core_set_warnings(vg_core_tests)

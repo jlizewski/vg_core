@@ -8,14 +8,17 @@
 #include <limits>
 #include <locale>
 #include <map>
+#include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 #include "vg_core/diagnostics.hpp"
 #include "vg_core/height_map.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/sun_map.hpp"
 #include "vg_core/version.hpp"
+#include "vg_core/voxel_cleanup.hpp"
 #include "vg_core/voxel_map_io.hpp"
 
 namespace vg {
@@ -45,8 +48,8 @@ constexpr std::array<FileInfo, 8> kFiles = {{
 }};
 
 // Stages in the order they run, for the manifest.
-constexpr std::array<const char*, 5> kStages = {"build", "surface", "ground", "sun",
-                                                "layers"};
+constexpr std::array<const char*, 6> kStages = {"build",  "voxels", "surface",
+                                                "ground", "sun",    "layers"};
 
 std::string json_number(double value) {
   if (!std::isfinite(value)) {
@@ -249,12 +252,9 @@ void create_map_package(const std::filesystem::path& dir, const TsdfVolume& volu
 
   const auto start = std::chrono::steady_clock::now();
   save_map(volume, metadata, dir / package_file::kMap);
-  const auto voxels = sorted_occupied_voxels(volume);
-  save_voxels_ply(voxels, volume.config().voxel_size, dir / package_file::kVoxels);
   write_manifest(dir, metadata, volume.config().voxel_size, {{"build", build_settings.json()}});
-  log << "3D map: " << volume.num_blocks() << " blocks, " << voxels.size()
-      << " occupied voxels -> " << package_file::kMap << ", " << package_file::kVoxels << " ("
-      << seconds_since(start) << " s)\n";
+  log << "3D map: " << volume.num_blocks() << " blocks -> " << package_file::kMap << " ("
+      << seconds_since(start) << " s)" << std::endl;
 }
 
 MapPackage::MapPackage(std::filesystem::path dir, std::ostream& log)
@@ -265,22 +265,84 @@ void MapPackage::set_min_weight(float min_weight) {
   occupied_.reset();
 }
 
+void MapPackage::set_min_blob_volume(double volume) {
+  min_blob_volume_ = volume;
+  occupied_.reset();
+}
+
 const std::vector<Eigen::Vector3i>& MapPackage::occupied() {
   if (!occupied_) {
-    occupied_ = sorted_occupied_voxels(map_.volume);
+    const auto all = sorted_occupied_voxels(map_.volume);
+    const double voxel = map_.volume.config().voxel_size;
+    const auto min_voxels =
+        static_cast<std::size_t>(std::ceil(min_blob_volume_ / (voxel * voxel * voxel) - 1e-9));
+    auto cleaned = remove_small_components(all, min_voxels);
+    specks_.clear();
+    if (cleaned.removed_voxels > 0) {
+      std::set<std::tuple<int, int, int>> kept;
+      for (const auto& v : cleaned.voxels) {
+        kept.emplace(v.x(), v.y(), v.z());
+      }
+      for (const auto& v : all) {
+        if (kept.count({v.x(), v.y(), v.z()}) == 0) {
+          specks_.push_back(v);
+        }
+      }
+      log_ << "left out " << cleaned.removed_components << " specks under " << min_blob_volume_
+           << " m^3 (" << cleaned.removed_voxels << " of " << all.size() << " voxels)" << std::endl;
+    }
+    occupied_ = std::move(cleaned.voxels);
   }
   return *occupied_;
+}
+
+void MapPackage::make_voxels() {
+  const auto start = std::chrono::steady_clock::now();
+  const double voxel_size = map_.volume.config().voxel_size;
+  save_voxels_ply(occupied(), voxel_size, path(package_file::kVoxels));
+  update_manifest(dir_, map_.metadata, voxel_size, "voxels",
+                  StageSettings()
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_blob_m3", min_blob_volume_)
+                      .add("voxels", occupied().size()));
+  log_ << "voxels: " << occupied().size() << " occupied -> " << package_file::kVoxels << " ("
+       << seconds_since(start) << " s)" << std::endl;
 }
 
 void MapPackage::make_surface(const SurfaceOptions& options) {
   const auto start = std::chrono::steady_clock::now();
   const double cell_size = options.cell_size.value_or(map_.metadata.cell_size);
-  const HeightMap map = make_height_map(map_.volume.extract_surface_points(), cell_size);
+  auto points = map_.volume.extract_surface_points();
+  occupied();  // Finds the specks.
+  if (!specks_.empty()) {
+    // A surface point belongs to a speck if its voxel or a face neighbor is one.
+    const double voxel = map_.volume.config().voxel_size;
+    std::set<std::tuple<int, int, int>> specks;
+    for (const auto& v : specks_) {
+      specks.emplace(v.x(), v.y(), v.z());
+    }
+    const auto in_speck = [&](const Eigen::Vector3d& p) {
+      const Eigen::Vector3i v = (p / voxel).array().floor().cast<int>();
+      for (int axis = -1; axis < 3; ++axis) {
+        for (const int side : {-1, 1}) {
+          const Eigen::Vector3i n =
+              axis < 0 ? v : Eigen::Vector3i(v + side * Eigen::Vector3i::Unit(axis));
+          if (specks.count({n.x(), n.y(), n.z()}) != 0) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    points.erase(std::remove_if(points.begin(), points.end(), in_speck), points.end());
+  }
+  const HeightMap map = make_height_map(points, cell_size);
   save_height_map(map, path(package_file::kSurface));
   update_manifest(dir_, map_.metadata, map_.volume.config().voxel_size, "surface",
                   StageSettings()
                       .add("cell_size_m", cell_size)
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight)));
+                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_blob_m3", min_blob_volume_));
   log_ << "surface: " << map.width << " x " << map.height << " cells -> "
        << package_file::kSurface << " (" << seconds_since(start) << " s)\n";
 }
@@ -309,6 +371,7 @@ void MapPackage::make_ground(const GroundOptions& options) {
                   StageSettings()
                       .add("cell_size_m", config.cell_size)
                       .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_blob_m3", min_blob_volume_)
                       .add("max_slope", config.max_slope)
                       .add("step_tolerance_m", config.step_tolerance)
                       .add("max_gap_m", config.max_gap)
@@ -380,6 +443,7 @@ bool MapPackage::make_sun(const SunOptions& options) {
                   StageSettings()
                       .add("year", options.year)
                       .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_blob_m3", min_blob_volume_)
                       .add("step_minutes", options.step_minutes)
                       .add("sample_height_m", config.sample_height)
                       .add("latitude", geo->latitude)
@@ -404,6 +468,7 @@ void MapPackage::make_layers(const SurfaceOptions& options) {
                   StageSettings()
                       .add("cell_size_m", cell_size)
                       .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_blob_m3", min_blob_volume_)
                       .add("columns", layers.columns)
                       .add("layered_columns", layers.layered_columns)
                       .add("gap_under_0.15_m", layers.by_gap[0])

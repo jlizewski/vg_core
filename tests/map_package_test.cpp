@@ -71,6 +71,7 @@ vg::SunOptions quick_sun() {
 
 TEST_F(MapPackageTest, WritesEveryMap) {
   vg::MapPackage package(dir_, log_);
+  package.make_voxels();
   package.make_surface();
   package.make_ground();
   ASSERT_TRUE(package.make_sun(quick_sun()));
@@ -150,6 +151,20 @@ TEST_F(MapPackageTest, NewPackageClearsTheOldOne) {
   EXPECT_FALSE(fs::exists(dir_ / file::kGround));
   EXPECT_TRUE(fs::exists(dir_ / file::kMap));
   EXPECT_EQ(read_file(dir_ / file::kManifest).find("\"ground\""), std::string::npos);
+}
+
+TEST_F(MapPackageTest, SpecksAreLeftOutOfEveryStage) {
+  vg::MapPackage package(dir_, log_);
+  package.set_min_blob_volume(0.0);
+  package.make_voxels();
+  const auto all = fs::file_size(dir_ / file::kVoxels);
+  // Bigger than anything in the scene: the whole map is a speck.
+  package.set_min_blob_volume(100.0);
+  package.make_voxels();
+  EXPECT_LT(fs::file_size(dir_ / file::kVoxels), all);
+  package.make_surface();
+  EXPECT_EQ(read_file(dir_ / file::kSurface).rfind("ncols 0", 0), 0u);
+  EXPECT_NE(read_file(dir_ / file::kManifest).find("\"min_blob_m3\": 100"), std::string::npos);
 }
 
 TEST(MapPackage, MissingMapThrows) {

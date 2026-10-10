@@ -143,6 +143,8 @@ int main(int argc, char** argv) {
   try {
     vg::io::build_map_package(session_path, package_dir, build, std::cout);
     vg::MapPackage package(package_dir, std::cout);
+    stages.apply(package);
+    package.make_voxels();
     package.make_surface(stages.surface);
     package.make_ground(stages.ground);
     package.make_sun(stages.sun);
