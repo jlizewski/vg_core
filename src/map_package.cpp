@@ -11,6 +11,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "vg_core/diagnostics.hpp"
 #include "vg_core/height_map.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/sun_map.hpp"
@@ -30,7 +31,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 7> kFiles = {{
+constexpr std::array<FileInfo, 8> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -39,10 +40,13 @@ constexpr std::array<FileInfo, 7> kFiles = {{
     {package_file::kSunHours, "h", "Hours of direct sun per ground cell over the year"},
     {package_file::kSunEnergy, "kWh/m^2",
      "Clear-sky direct solar energy per ground cell over the year"},
+    {package_file::kLayers, "m",
+     "Diagnostic: gap from the lowest surface to a second one above it (ghosts if small)"},
 }};
 
 // Stages in the order they run, for the manifest.
-constexpr std::array<const char*, 4> kStages = {"build", "surface", "ground", "sun"};
+constexpr std::array<const char*, 5> kStages = {"build", "surface", "ground", "sun",
+                                                "layers"};
 
 std::string json_number(double value) {
   if (!std::isfinite(value)) {
@@ -379,6 +383,33 @@ bool MapPackage::make_sun(const SunOptions& options) {
        << sun.daylight_hours << " h) -> " << package_file::kSunHours << ", "
        << package_file::kSunEnergy << " (" << seconds_since(start) << " s)\n";
   return true;
+}
+
+void MapPackage::make_layers(const SurfaceOptions& options) {
+  const auto start = std::chrono::steady_clock::now();
+  const double cell_size = options.cell_size.value_or(map_.metadata.cell_size);
+  const double voxel_size = map_.volume.config().voxel_size;
+  const SurfaceLayers layers = find_surface_layers(occupied(), voxel_size, cell_size);
+  save_height_map(layers.gap, path(package_file::kLayers));
+  update_manifest(dir_, map_.metadata, voxel_size, "layers",
+                  StageSettings()
+                      .add("cell_size_m", cell_size)
+                      .add("columns", layers.columns)
+                      .add("layered_columns", layers.layered_columns)
+                      .add("gap_under_0.15_m", layers.by_gap[0])
+                      .add("gap_0.15_to_0.3_m", layers.by_gap[1])
+                      .add("gap_0.3_to_0.6_m", layers.by_gap[2])
+                      .add("gap_0.6_to_1.2_m", layers.by_gap[3])
+                      .add("gap_over_1.2_m", layers.by_gap[4]));
+  const auto percent = [&](std::size_t n) {
+    return layers.columns == 0 ? 0.0 : 100.0 * static_cast<double>(n) / layers.columns;
+  };
+  log_ << "layers: " << layers.layered_columns << " of " << layers.columns << " voxel columns ("
+       << percent(layers.layered_columns) << "%) have a second surface above the lowest; gap "
+       << "<0.15 m " << percent(layers.by_gap[0]) << "%, 0.15-0.3 m " << percent(layers.by_gap[1])
+       << "%, 0.3-0.6 m " << percent(layers.by_gap[2]) << "%, 0.6-1.2 m "
+       << percent(layers.by_gap[3]) << "%, >1.2 m " << percent(layers.by_gap[4]) << "% -> "
+       << package_file::kLayers << " (" << seconds_since(start) << " s)\n";
 }
 
 }  // namespace vg

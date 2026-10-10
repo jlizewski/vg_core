@@ -192,6 +192,19 @@ in minutes). If the session has no GPS, or the walk was too short to tell
 which way the map faces, pass `--lat`/`--lon` and `--x-bearing` (compass
 bearing of the map's +x axis); without a location the sun maps are skipped.
 
+When a map comes out rough, two diagnostics tell noisy depth from tracking
+error:
+
+```sh
+vg mcap stats session.mcap    # pose jumps, tracking changes, depth range / edge / confidence stats
+vg map garden/ layers         # layers.asc: where a second surface sits over the first (ghosts)
+```
+
+Pose jumps (ARCore snapping its pose by several cm in one frame) double the
+surfaces seen before and after them. Lots of far or edge depth makes
+floating blobs; ghost layers mostly at the map's edges point to far depth
+rather than tracking.
+
 A recording the app never closed (killed, crashed, out of space) has no index,
 and its last chunk may be cut off. `vg_replay` still reads it, but Foxglove and
 other tools may not. `vg mcap repair` writes a new, indexed copy holding

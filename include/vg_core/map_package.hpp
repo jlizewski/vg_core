@@ -10,6 +10,7 @@
 //   objects.ply     everything on or over the ground       <- ground stage
 //   sun_hours.asc   hours of direct sun per cell           <- sun stage
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
+//   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
 //   manifest.json   what each file is, and the settings each stage last ran with
 //
 // The 3D map is the core: it is built once from the recording (see
@@ -39,6 +40,7 @@ inline constexpr const char* kGround = "ground.asc";
 inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
+inline constexpr const char* kLayers = "layers.asc";
 inline constexpr const char* kManifest = "manifest.json";
 }  // namespace package_file
 
@@ -112,6 +114,9 @@ class MapPackage {
   // nothing, if the package has no ground map or its location is unknown (no
   // GPS in the session and no latitude/longitude given).
   bool make_sun(const SunOptions& options);
+
+  // layers.asc: a diagnostic of ghost surfaces, see find_surface_layers().
+  void make_layers(const SurfaceOptions& options = {});
 
  private:
   // All occupied voxels, sorted, computed once.
