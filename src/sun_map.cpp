@@ -224,7 +224,11 @@ Eigen::Vector3d ground_normal(const HeightMap& map, int x, int y) {
 
 SunMap compute_sun_map(const GroundMap& ground, const std::vector<Eigen::Vector3i>& voxels,
                        double voxel_size, const GeoReference& geo, const SunMapConfig& config) {
-  const HeightMap& heights = ground.heights;
+  return compute_sun_map(ground.heights, voxels, voxel_size, geo, config);
+}
+
+SunMap compute_sun_map(const HeightMap& heights, const std::vector<Eigen::Vector3i>& voxels,
+                       double voxel_size, const GeoReference& geo, const SunMapConfig& config) {
   SunMap result;
   result.sun_hours = heights;
   result.irradiation = heights;

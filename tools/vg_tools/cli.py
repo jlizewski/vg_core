@@ -7,7 +7,9 @@ Run from anywhere inside the repository, e.g.:
     vg format --check   # verify clang-format on C++ sources
     vg schemas          # regenerate embedded MCAP schema descriptors
     vg heatmap sun.asc sun.png   # render a sun map (or any .asc grid) as a PNG
-    vg replay rec.mcap map.asc   # run a C++ app from apps/ (see vg_tools/apps.py)
+    vg preview garden/           # render every .asc in a directory as a PNG
+    vg replay rec.mcap garden/   # build a map package (C++ app from apps/, see vg_tools/apps.py)
+    vg map garden/ ground sun    # re-run map package stages from its saved 3D map
     vg mcap repair rec.mcap      # index a recording that was never closed
 """
 
@@ -25,7 +27,7 @@ from vg_tools import apps
 CPP_DIRS = ("apps", "include", "src", "tests")
 CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 # Commands implemented here; a C++ app can't take one of these names.
-BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap")
+BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap", "preview")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -110,6 +112,22 @@ def cmd_heatmap(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_preview(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import heatmap
+
+    try:
+        written = heatmap.write_previews(args.directory, args.scale)
+    except (OSError, ValueError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    for png in written:
+        print(png)
+    if not written:
+        print(f"vg: no .asc grids in {args.directory}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def add_app_parsers(sub: argparse._SubParsersAction, app_list: Sequence[apps.App]) -> None:
     """List the C++ apps in --help. main() runs them before argparse sees their
     arguments, so these parsers are only for help (and `vg mcap` alone)."""
@@ -165,6 +183,13 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
     p.add_argument("--min", type=float, help="value shown darkest (default: grid minimum)")
     p.add_argument("--max", type=float, help="value shown brightest (default: grid maximum)")
     p.set_defaults(func=cmd_heatmap)
+
+    p = sub.add_parser(
+        "preview", help="render every .asc grid in a directory (e.g. a map package) as a PNG"
+    )
+    p.add_argument("directory", type=Path, help="directory holding .asc grids")
+    p.add_argument("--scale", type=int, default=4, help="pixels per cell (default: 4)")
+    p.set_defaults(func=cmd_preview)
 
     add_app_parsers(sub, apps.discover(root or repo_root()))
     return parser

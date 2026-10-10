@@ -224,4 +224,41 @@ TEST(GroundSegmentation, SeparatesRaisedBedInFusedMap) {
   EXPECT_NEAR(ground_at(result.ground, 0.5, 0.0), 0.0, 0.03);
 }
 
+TEST(GroundSegmentation, SeparatesRaisedBedAtCoarseVoxels) {
+  // The map package's default: 3 inch voxels under 6 inch cells.
+  vg::test::Scene scene;
+  scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.8, 0.3, 0.3}};
+  vg::TsdfConfig config;
+  config.max_depth = 2.5;
+  config.voxel_size = 0.0762;
+  config.truncation_distance = 3 * config.voxel_size;
+  vg::TsdfVolume volume(config);
+  const Eigen::Vector3d target(0.5, 0.0, 0.0);
+  for (const Eigen::Vector3d& eye :
+       {Eigen::Vector3d(0.5, 0.0, 1.5), Eigen::Vector3d(-0.7, 0.5, 1.2),
+        Eigen::Vector3d(1.7, -0.5, 1.2), Eigen::Vector3d(0.5, 1.2, 1.2),
+        Eigen::Vector3d(0.5, -1.2, 1.2)}) {
+    const auto pose = vg::test::look_at(eye, target, Eigen::Vector3d::UnitZ());
+    volume.integrate(vg::test::render_depth(scene, pose), pose);
+  }
+
+  vg::GroundConfig ground;
+  ground.cell_size = 0.1524;
+  const auto result = vg::segment_ground(volume, ground);
+
+  ASSERT_FALSE(result.segments.empty());
+  const auto& bed = result.segments[0];
+  EXPECT_TRUE(bed.grounded);
+  EXPECT_NEAR(bed.top_above_ground, 0.30, config.voxel_size);
+  // Inside the walls, where fusion rounds the corner a voxel or two up, the
+  // ground is patched from the open ground rather than read off the walls.
+  EXPECT_TRUE(filled_at(result.ground, 0.5, 0.0));
+  for (const double x : {0.3, 0.5, 0.7}) {
+    for (const double y : {-0.2, 0.0, 0.2}) {
+      EXPECT_NEAR(ground_at(result.ground, x, y), 0.0, 0.03) << x << "," << y;
+    }
+  }
+  EXPECT_NEAR(ground_at(result.ground, -0.4, 0.0), 0.0, 0.01);
+}
+
 }  // namespace

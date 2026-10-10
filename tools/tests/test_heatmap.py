@@ -73,3 +73,20 @@ def test_cli_writes_png(tmp_path: Path, capsys):
     second_grid_row = raw[2 * stride + 1 : 3 * stride]
     assert second_grid_row[0:4] == bytes((*heatmap.STOPS[-1][1], 255))
     assert "0 (dark) to 10 (bright)" in capsys.readouterr().out
+
+
+def test_write_previews_renders_each_grid(tmp_path: Path):
+    (tmp_path / "ground.asc").write_text(GRID)
+    (tmp_path / "sun_hours.asc").write_text(GRID)
+    (tmp_path / "voxels.ply").write_bytes(b"")
+    written = heatmap.write_previews(tmp_path, scale=1)
+    assert written == [tmp_path / "ground.png", tmp_path / "sun_hours.png"]
+    width, height, _ = decode_png((tmp_path / "ground.png").read_bytes())
+    assert (width, height) == (3, 2)
+
+
+def test_preview_command(tmp_path: Path):
+    (tmp_path / "surface.asc").write_text(GRID)
+    assert cli.main(["preview", str(tmp_path)]) == 0
+    assert (tmp_path / "surface.png").is_file()
+    assert cli.main(["preview", str(tmp_path / "empty")]) == 1

@@ -69,6 +69,10 @@ void MapBuilder::resolve(const PoseStamped* next_pose) {
     integrate(pending.camera, pending.frame, world_from_camera);
     return;
   }
+  if (pending.live && config_.drop_non_keyframes) {
+    ++stats_.dropped;
+    return;
+  }
   if (!deferred_) {
     deferred_ = config_.deferred_path.empty() ? std::make_unique<DepthSpool>()
                                               : std::make_unique<DepthSpool>(config_.deferred_path);

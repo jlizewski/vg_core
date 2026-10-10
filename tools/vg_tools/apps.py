@@ -7,11 +7,15 @@ Every `apps/vg_<name>.cpp` is built as the CMake target `vg_<name>` and runs as
     apps/vg_mcap_repair.cpp  ->  vg mcap repair ...
 
 Arguments after the subcommand go to the app unchanged. Before running, the app
-is built (incrementally) in the release preset if it's configured, else debug,
-so it's never stale. Two options are taken out for `vg` itself:
+is built (incrementally) in the release preset, so it's never stale and never
+an unoptimized debug build by accident. Two options are taken out for `vg`
+itself:
 
-    --vg-preset NAME   use this CMake preset's build
+    --vg-preset NAME   use this CMake preset's build (e.g. debug)
     --vg-no-build      run the existing binary without building it first
+
+Apps that write a map package (vg replay, vg map) are followed by PNG previews
+of the package's .asc maps.
 
 The help shown by `vg --help` is the app's first comment line,
 `// vg_<name>: what it does`.
@@ -26,8 +30,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-# Presets tried, in order, when --vg-preset isn't given.
-PRESETS = ("release", "debug")
+# The preset apps run from when --vg-preset isn't given.
+DEFAULT_PRESET = "release"
 # Where multi-config generators (Visual Studio, Ninja Multi-Config) put binaries.
 CONFIG_DIRS = ("", "Release", "Debug", "RelWithDebInfo", "MinSizeRel")
 
@@ -37,6 +41,10 @@ class App:
     target: str  # CMake target and binary name, e.g. vg_mcap_repair
     words: tuple[str, ...]  # subcommand words, e.g. ("mcap", "repair")
     help: str
+
+
+# Apps that write a map package, and which of their arguments is its directory.
+PACKAGE_DIR_ARG = {"vg_replay": 1, "vg_map": 0}
 
 
 def discover(root: Path) -> list[App]:
@@ -107,18 +115,6 @@ def configured(root: Path, preset: str) -> bool:
     return (root / "build" / preset / "CMakeCache.txt").is_file()
 
 
-def choose_preset(root: Path, target: str) -> str:
-    """The first preset that's configured, preferring one that already has the
-    app built; release if none is configured yet."""
-    for preset in PRESETS:
-        if configured(root, preset) and find_binary(root, preset, target):
-            return preset
-    for preset in PRESETS:
-        if configured(root, preset):
-            return preset
-    return PRESETS[0]
-
-
 def _cmake(cmd: list[str], root: Path) -> int:
     # Build output goes to stderr so the app's own stdout stays clean.
     print("+", " ".join(cmd), file=sys.stderr, flush=True)
@@ -136,7 +132,7 @@ def build(root: Path, preset: str, target: str) -> int:
 def run(app: App, args: Sequence[str], root: Path) -> int:
     """Build (unless --vg-no-build) and run app with args, from the current directory."""
     preset, do_build, rest = split_options(args)
-    preset = preset or choose_preset(root, app.target)
+    preset = preset or DEFAULT_PRESET
     if do_build:
         rc = build(root, preset, app.target)
         if rc:
@@ -151,6 +147,27 @@ def run(app: App, args: Sequence[str], root: Path) -> int:
         )
         return 1
     try:
-        return subprocess.call([str(binary), *rest])
+        rc = subprocess.call([str(binary), *rest])
     except KeyboardInterrupt:
         return 130
+    if rc == 0:
+        package_dir = package_dir_of(app, rest)
+        if package_dir is not None:
+            preview_package(package_dir)
+    return rc
+
+
+def package_dir_of(app: App, args: Sequence[str]) -> Path | None:
+    """The map package directory an app wrote, if it writes one."""
+    index = PACKAGE_DIR_ARG.get(app.target)
+    if index is None or index >= len(args) or args[index].startswith("--"):
+        return None
+    path = Path(args[index])
+    return path if path.is_dir() else None
+
+
+def preview_package(package_dir: Path) -> None:
+    from vg_tools import heatmap
+
+    for png in heatmap.write_previews(package_dir):
+        print(f"preview {png}")

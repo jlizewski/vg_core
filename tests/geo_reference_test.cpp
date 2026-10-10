@@ -21,7 +21,9 @@ Walk make_walk(double heading, const Eigen::Vector3d& origin_enu, double ref_lat
                double gps_noise, double side) {
   Walk walk;
   std::mt19937 rng(7);
-  std::normal_distribution<double> noise(0.0, gps_noise);
+  // A zero sigma is invalid for normal_distribution (MSVC debug builds assert).
+  std::normal_distribution<double> gaussian(0.0, gps_noise > 0.0 ? gps_noise : 1.0);
+  const auto noise = [&](std::mt19937& g) { return gps_noise > 0.0 ? gaussian(g) : 0.0; };
   const Eigen::AngleAxisd enu_from_world(heading, Eigen::Vector3d::UnitZ());
   const double meters_per_deg_lat =
       vg::enu_offset(ref_lat + 1e-3, ref_lon, 0.0, ref_lat, ref_lon, 0.0).y() / 1e-3;

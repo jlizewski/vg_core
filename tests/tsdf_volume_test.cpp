@@ -149,6 +149,60 @@ TEST(TsdfVolume, OccupiedVoxelsShowRaisedBed) {
   EXPECT_GT(top, 500u);  // The bed's top is 0.6 x 0.6 m: ~28 x 28 voxels.
 }
 
+// Fuses the raised bed from a few views into volume.
+void fuse_bed(vg::TsdfVolume& volume) {
+  Scene scene;
+  scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.8, 0.3, 0.3}};
+  const Eigen::Vector3d target(0.3, 0.0, 0.0);
+  for (const Eigen::Vector3d& eye :
+       {Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(-1.0, 0.5, 1.4),
+        Eigen::Vector3d(1.5, -0.5, 1.2)}) {
+    const auto pose = look_at(eye, target, Eigen::Vector3d::UnitZ());
+    volume.integrate(render_depth(scene, pose), pose);
+  }
+}
+
+TEST(TsdfVolume, ThreadsGiveTheSameVolume) {
+  vg::TsdfConfig config;
+  config.max_depth = 2.5;
+  vg::TsdfVolume serial(config);
+  config.threads = 4;
+  vg::TsdfVolume threaded(config);
+  fuse_bed(serial);
+  fuse_bed(threaded);
+
+  const auto indices = serial.block_indices();
+  ASSERT_EQ(indices, threaded.block_indices());
+  for (const auto& index : indices) {
+    const auto& a = *serial.find_block(index);
+    const auto& b = *threaded.find_block(index);
+    for (std::size_t i = 0; i < a.size(); ++i) {
+      ASSERT_EQ(a[i].tsdf, b[i].tsdf);
+      ASSERT_EQ(a[i].weight, b[i].weight);
+    }
+  }
+}
+
+TEST(TsdfVolume, PixelStrideKeepsCoarseMap) {
+  // At 3 inch voxels, placing blocks from every other pixel finds the same
+  // surface as every pixel.
+  vg::TsdfConfig config;
+  config.max_depth = 2.5;
+  config.voxel_size = 0.0762;
+  config.truncation_distance = 3 * config.voxel_size;
+  vg::TsdfVolume every(config);
+  config.pixel_stride = 2;
+  vg::TsdfVolume strided(config);
+  fuse_bed(every);
+  fuse_bed(strided);
+
+  const auto all = every.occupied_voxels();
+  const auto some = strided.occupied_voxels();
+  ASSERT_GT(all.size(), 100u);
+  EXPECT_GE(static_cast<double>(some.size()), 0.98 * static_cast<double>(all.size()));
+  EXPECT_LE(strided.num_blocks(), every.num_blocks());
+}
+
 TEST(HeightMap, KeepsHighestPointPerCell) {
   const auto map =
       vg::make_height_map({{0.05, 0.05, 1.0}, {0.07, 0.02, 2.0}, {0.25, 0.05, 0.5}}, 0.1);

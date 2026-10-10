@@ -118,3 +118,17 @@ def write_heatmap(
     png, lo, hi = render(read_ascii_grid(src), scale, vmin, vmax)
     dst.write_bytes(png)
     return lo, hi
+
+
+def write_previews(directory: Path, scale: int = 4) -> list[Path]:
+    """Render every non-empty .asc grid in directory as a PNG beside it (sun.asc -> sun.png)."""
+    written = []
+    for path in sorted(directory.glob("*.asc")):
+        grid = read_ascii_grid(path)
+        if grid.ncols == 0 or grid.nrows == 0:
+            continue  # An empty map, e.g. from a session without depth.
+        png = path.with_suffix(".png")
+        data, _, _ = render(grid, scale)
+        png.write_bytes(data)
+        written.append(png)
+    return written

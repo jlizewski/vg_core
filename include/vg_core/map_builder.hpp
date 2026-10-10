@@ -29,6 +29,9 @@ struct MapBuilderConfig {
   // with integrate_deferred(). Both 0 (the default) fuses every frame live.
   double keyframe_translation = 0.0;
   double keyframe_rotation = 0.0;
+  // Drop frames that aren't keyframes instead of deferring them, when the map
+  // doesn't need every frame (e.g. a batch rebuild at coarse voxels).
+  bool drop_non_keyframes = false;
 
   // Where deferred frames are kept: a file at this path (deleted when the
   // builder is destroyed), or memory if empty.
@@ -55,6 +58,7 @@ class MapBuilder {
     std::size_t skipped_no_pose = 0;   // No pose close enough in time.
     std::size_t skipped_tracking = 0;  // Taken while tracking was unreliable.
     std::size_t deferred = 0;          // Set aside for integrate_deferred().
+    std::size_t dropped = 0;           // Not keyframes, with drop_non_keyframes.
   };
 
   explicit MapBuilder(const MapBuilderConfig& config = {});

@@ -29,8 +29,8 @@ The map builder has to run on device (Android, iOS) as well as on desktop
 
 vg_core_io provides `SessionWriter`, `SessionReader`, a `play()` function that
 replays a session at its recorded speed (or scaled, or as fast as possible),
-and the `vg_replay` command-line tool that rebuilds a height map from a
-recording.
+and the `vg_replay` command-line tool that rebuilds a map package (3D map,
+ground, objects, sun maps) from a recording.
 
 On a phone, the app can feed live sensor data straight into `vg_core`, or
 record a session through `vg_core_io`'s writer (via JNI / Objective-C++), so

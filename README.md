@@ -18,7 +18,7 @@ on any platform.
 | `tests/` | C++ unit tests (GoogleTest) |
 | `cmake/` | CMake helper modules |
 | `src/io/`, `include/vg_core/io/` | `vg_core_io`: capture session recording and playback (MCAP) |
-| `apps/` | Command-line apps (`vg_replay`, `vg_mcap_repair`), run as `vg replay`, `vg mcap repair` |
+| `apps/` | Command-line apps (`vg_replay`, `vg_map`, `vg_mcap_repair`), run as `vg replay`, `vg map`, `vg mcap repair` |
 | `tools/` | Python development tools (`vg` CLI) |
 | `docs/` | Design docs, including the [capture format](docs/capture-format.md) |
 | `schemas/` | Protobuf schemas for vg-specific capture messages |
@@ -133,29 +133,64 @@ from GPS is only as good as the walk was long compared with the GPS error;
 over a 10 m x 10 m map at 5 cm cells takes about 15 s on 4 cores (release
 build).
 
-## Replaying a recording
+## Replaying a recording: the map package
 
-`vg_replay` rebuilds a map from a capture session
-([format](docs/capture-format.md)) and writes its height map, and optionally the 3D voxel map as a PLY mesh of
-cubes (opens in MeshLab, Blender or CloudCompare):
+`vg replay` turns a capture session ([format](docs/capture-format.md)) into a
+**map package**: a directory with the 3D voxel map and every map derived from
+it.
 
 ```sh
-vg replay session.mcap garden.asc            # as fast as possible
-vg replay session.mcap garden.asc --rate 1   # at recorded speed, printing progress
-vg replay session.mcap garden.asc --voxel 0.01 --trunc 0.04 --cell 0.02
-vg replay session.mcap garden.asc --voxels garden.ply  # also write 3D voxels
-vg replay session.mcap garden.asc --ground ground.asc --objects objects.ply
-vg replay session.mcap garden.asc --sun-map sun.asc --sun-energy energy.asc
-vg heatmap sun.asc sun.png                    # view the sun map as a heatmap
+vg replay session.mcap garden/               # 6 in cells, 3 in voxels
+vg replay session.mcap garden/ --rate 1      # at recorded speed, printing progress
+vg replay session.mcap garden/ --resolution 0.1 --year 2027 --sun-step 30
 ```
 
-`--sun-map` simulates the current year by default (`--year 2027`, and
-`--sun-step 30` for 30-minute steps). If the session has no GPS, or the walk was
-too short to tell which way the map faces, pass `--lat`/`--lon` and
-`--x-bearing` (compass bearing of the map's +x axis).
+```
+garden/
+  map.vgm          the 3D map (TSDF voxel volume + where it is on the Earth)
+  voxels.ply       its occupied voxels as cubes (MeshLab, Blender, CloudCompare)
+  surface.asc      height of the highest surface per cell (m)
+  ground.asc       height of the bare ground per cell, holes under objects patched (m)
+  objects.ply      everything on or over the ground
+  sun_hours.asc    hours of direct sun per ground cell over the year
+  sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
+  manifest.json    what each file is, and the settings each stage last ran with
+  *.png            previews of the .asc maps
+```
 
-`vg replay` (see [Development tools](#development-tools-python--310)) builds
-and runs `vg_replay`; the binary itself is `build/<preset>/vg_replay`.
+The 3D map is the core: everything else is derived from `map.vgm`, never from
+the recording. To change how a map is derived, re-run just that stage on the
+saved map with `vg map`, which takes seconds:
+
+```sh
+vg map garden/ ground sun --max-slope 0.6    # stricter ground, then its sun map
+vg map garden/ sun --x-bearing 15            # fix the map's heading
+vg map garden/ all --cell 0.1                # every 2D map at 10 cm
+```
+
+The stages are `surface`, `ground` (also writes `objects.ply`) and `sun`, which
+reads `ground.asc`, so re-run `sun` after `ground`. In code they're
+`vg::MapPackage` ([map_package.hpp](include/vg_core/map_package.hpp)), and the
+build stage is `vg::io::build_map_package()`.
+
+`--resolution` (default 6 in, 0.1524 m) is the cell size of the 2D maps; the
+voxels are half that (`--voxel`) so thin things like stems and posts still
+show up. To keep replay fast, only frames taken after the phone has moved
+5 cm or turned 5° are fused (`--keyframe-dist`, `--keyframe-angle`; 0 for
+every frame), and blocks are placed from every other depth pixel (`--stride`).
+`vg replay --help` lists every option. A ~1.5 GB, 35 m recording takes about
+10 s (release build).
+
+`.asc` files are ESRI ASCII grids: plain text, a six-line header (size,
+lower-left corner, cell size, no-data value) and then one value per cell, top
+row first. QGIS and GDAL open them directly; `vg heatmap` and `vg preview`
+render them. Coordinates are the map's local frame in meters;
+`manifest.json`'s `geo_reference` places it on the Earth.
+
+The sun stage simulates the current year by default (`--year`, `--sun-step`
+in minutes). If the session has no GPS, or the walk was too short to tell
+which way the map faces, pass `--lat`/`--lon` and `--x-bearing` (compass
+bearing of the map's +x axis); without a location the sun maps are skipped.
 
 A recording the app never closed (killed, crashed, out of space) has no index,
 and its last chunk may be cut off. `vg_replay` still reads it, but Foxglove and
@@ -211,7 +246,9 @@ pytest tools        # test the tools themselves
 vg schemas          # regenerate src/io/schema_descriptors.cpp after editing schemas/
                     # (needs: pip install -e "tools[schemas]")
 vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a heatmap PNG
+vg preview dir/     # render every .asc in a directory as a PNG
 vg replay ...       # run a C++ app from apps/ (here vg_replay), building it first
+vg map ...          # vg_map
 vg mcap repair ...  # vg_mcap_repair
 ```
 
@@ -222,9 +259,10 @@ with underscores splitting the name into words (`apps/vg_mcap_repair.cpp` is
 pick it up, and its first line, `// vg_<name>: what it does`, is its
 `vg --help` entry. Arguments go to the app unchanged, and it runs in the
 current directory, so `vg` works on recordings anywhere. Before each run the
-app is rebuilt (incrementally) in the release build if one is configured, else
-debug; `--vg-preset NAME` picks the build and `--vg-no-build` skips the
-rebuild.
+app is rebuilt (incrementally) in the release build, configuring it if needed,
+since a debug build of the mapping is many times slower; `--vg-preset NAME`
+picks another build and `--vg-no-build` skips the rebuild. After `vg replay`
+and `vg map`, the package's maps are rendered as PNG previews.
 
 ## License
 
