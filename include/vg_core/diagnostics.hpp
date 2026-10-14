@@ -13,6 +13,7 @@
 #include "vg_core/depth_filter.hpp"
 #include "vg_core/height_map.hpp"
 #include "vg_core/pose_jumps.hpp"
+#include "vg_core/semantics.hpp"
 #include "vg_core/sensor_data.hpp"
 
 namespace vg {
@@ -58,6 +59,9 @@ class DepthStats {
   const std::array<std::size_t, kBands>& valid_by_range() const { return valid_by_range_; }
   const std::array<std::size_t, kBands>& edges_by_range() const { return edges_by_range_; }
   const std::array<std::size_t, kConfidenceBands>& by_confidence() const { return by_confidence_; }
+  std::size_t frames_with_labels() const { return frames_with_labels_; }
+  // Readings by semantic class (index: SemanticClass value), in labeled frames.
+  const std::array<std::size_t, kSemanticClasses>& by_label() const { return by_label_; }
   double edge_ratio() const { return edge_ratio_; }
   // Size of the last frame.
   int width() const { return width_; }
@@ -72,6 +76,8 @@ class DepthStats {
   std::array<std::size_t, kBands> valid_by_range_{};
   std::array<std::size_t, kBands> edges_by_range_{};
   std::array<std::size_t, kConfidenceBands> by_confidence_{};
+  std::size_t frames_with_labels_ = 0;
+  std::array<std::size_t, kSemanticClasses> by_label_{};
   int width_ = 0;
   int height_ = 0;
 };

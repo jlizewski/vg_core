@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "test_scene.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace {
 
@@ -75,6 +76,21 @@ TEST(VolumeIo, RoundTripsVolumeAndMetadata) {
   std::stringstream again;
   vg::write_map(saved.volume, saved.metadata, again);
   EXPECT_EQ(again.str(), stream.str());
+}
+
+TEST(VolumeIo, RoundTripsLabelVotes) {
+  vg::TsdfVolume volume = fused_ground();
+  auto& labels = volume.insert_labels(Eigen::Vector3i(0, 0, -1));
+  labels[5][static_cast<std::size_t>(vg::SemanticClass::Ground)] = 9;
+  labels[5][static_cast<std::size_t>(vg::SemanticClass::Plant)] = 3;
+  labels[7][static_cast<std::size_t>(vg::SemanticClass::Structure)] = 255;
+
+  std::stringstream stream;
+  vg::write_map(volume, vg::MapMetadata{}, stream);
+  const auto saved = vg::read_map(stream);
+  ASSERT_TRUE(saved.volume.has_labels());
+  ASSERT_EQ(saved.volume.label_block_indices(), volume.label_block_indices());
+  EXPECT_EQ(*saved.volume.find_labels(Eigen::Vector3i(0, 0, -1)), labels);
 }
 
 TEST(VolumeIo, KeepsMissingGeoReference) {

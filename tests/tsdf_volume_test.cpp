@@ -294,6 +294,82 @@ TEST(TsdfVolume, CarvingKeepsTheSurface) {
   EXPECT_NEAR(static_cast<double>(b), static_cast<double>(a), 0.02 * static_cast<double>(a));
 }
 
+// Fuses the raised bed with semantic labels: the box as box_label, the
+// ground as ground.
+vg::TsdfVolume fuse_labeled_bed(vg::SemanticClass box_label, vg::SemanticMask drop = 0) {
+  Scene scene;
+  scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.8, 0.3, 0.3}};
+  vg::TsdfConfig config;
+  config.max_depth = 2.5;
+  config.voxel_size = 0.0762;
+  config.truncation_distance = 3 * config.voxel_size;
+  config.drop_labels = drop;
+  vg::TsdfVolume volume(config);
+  const Eigen::Vector3d target(0.5, 0.0, 0.0);
+  for (const Eigen::Vector3d& eye :
+       {Eigen::Vector3d(0.5, 0.0, 1.5), Eigen::Vector3d(-0.7, 0.5, 1.2),
+        Eigen::Vector3d(1.7, -0.5, 1.2)}) {
+    const auto pose = look_at(eye, target, Eigen::Vector3d::UnitZ());
+    auto frame = render_depth(scene, pose);
+    frame.labels = vg::test::render_labels(
+        scene, pose, static_cast<std::uint8_t>(vg::SemanticClass::Ground),
+        static_cast<std::uint8_t>(box_label));
+    volume.integrate(frame, pose);
+  }
+  return volume;
+}
+
+TEST(TsdfVolume, LabelVotesSayWhatThingsAre) {
+  const auto volume = fuse_labeled_bed(vg::SemanticClass::Structure);
+  ASSERT_TRUE(volume.has_labels());
+  const double voxel = volume.config().voxel_size;
+  std::size_t bed = 0, bed_right = 0, ground = 0, ground_right = 0;
+  for (const auto& v : volume.occupied_voxels()) {
+    const double x = (v.x() + 0.5) * voxel;
+    const double y = (v.y() + 0.5) * voxel;
+    const double z = (v.z() + 0.5) * voxel;
+    const auto label = volume.label_of(v);
+    // Well inside the bed's top, and well away from it on the ground.
+    if (x > 0.3 && x < 0.7 && y > -0.2 && y < 0.2 && z > 0.15) {
+      ++bed;
+      bed_right += label == vg::SemanticClass::Structure ? 1 : 0;
+    } else if ((x < 0.0 || x > 1.0 || y < -0.5 || y > 0.5) && z < 0.0) {
+      ++ground;
+      ground_right += label == vg::SemanticClass::Ground ? 1 : 0;
+    }
+  }
+  ASSERT_GT(bed, 10u);
+  ASSERT_GT(ground, 50u);
+  EXPECT_EQ(bed_right, bed);
+  EXPECT_GE(static_cast<double>(ground_right), 0.95 * static_cast<double>(ground));
+
+  // A voxel with fewer votes than asked for is unknown.
+  const auto top = Eigen::Vector3i(6, 0, 3);
+  ASSERT_TRUE(volume.label_of(top));
+  EXPECT_FALSE(volume.label_of(top, 1000));
+}
+
+TEST(TsdfVolume, DroppedClassesStayOutOfTheMap) {
+  // The bed labeled as a person: dropped, so only the ground is mapped.
+  const auto volume = fuse_labeled_bed(vg::SemanticClass::Dynamic,
+                                       vg::mask_of(vg::SemanticClass::Dynamic));
+  const double voxel = volume.config().voxel_size;
+  std::size_t raised = 0;
+  for (const auto& v : volume.occupied_voxels()) {
+    raised += (v.z() + 0.5) * voxel > 0.15 ? 1 : 0;
+    EXPECT_NE(volume.label_of(v), vg::SemanticClass::Dynamic) << v.transpose();
+  }
+  EXPECT_EQ(raised, 0u);
+  EXPECT_GT(volume.occupied_voxels().size(), 100u);
+}
+
+TEST(TsdfVolume, UnlabeledFramesHaveNoVotes) {
+  vg::TsdfVolume volume;
+  fuse_bed(volume);
+  EXPECT_FALSE(volume.has_labels());
+  EXPECT_FALSE(volume.label_of(Eigen::Vector3i(0, 0, -1)));
+}
+
 TEST(HeightMap, KeepsHighestPointPerCell) {
   const auto map =
       vg::make_height_map({{0.05, 0.05, 1.0}, {0.07, 0.02, 2.0}, {0.25, 0.05, 0.5}}, 0.1);

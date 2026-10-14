@@ -20,7 +20,8 @@ class SessionWriter {
   void write(const CameraCalibration& calibration);
   void write(const StaticTransforms& transforms);
   void write(const CameraImage& image);
-  // Writes the depth calibration and confidence (if any) alongside the depth.
+  // Writes the depth calibration, confidence and semantic labels (if any)
+  // alongside the depth.
   void write(const DepthImage& depth);
   void write(const PoseStamped& pose);
   void write(const TrackingStatus& status);

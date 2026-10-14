@@ -154,6 +154,8 @@ garden/
   objects.ply      everything on or over the ground
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
+  labels.ply       voxels colored by semantic class (when the recording has labels)
+  semantic.asc     semantic class seen from above per cell (when it has labels)
   trajectory.csv   the camera's path while mapping (t, x, y, z)
   config.yaml      the settings it was made with: edit, then re-run stages with vg map
   manifest.json    what each file is, and the settings each stage last ran with
@@ -239,6 +241,25 @@ still show up. Phone depth is noisy, so the build cleans it up:
   than 0.01 m³ are left out of every map.
 
 A ~1.5 GB, 5 minute, 35 m recording takes about 20 s (release build).
+
+### Semantic labels
+
+When a recording carries semantic labels (`/cam/<name>/depth/labels`, a class
+per depth pixel from a segmentation model; see the
+[capture format](docs/capture-format.md)), fusion counts per voxel the classes
+it was seen as: ground, plant, tree, structure, sky or dynamic
+([semantics.hpp](include/vg_core/semantics.hpp)). Votes from many frames settle
+what single-frame labels get wrong, and stages ask the map by class.
+
+- Readings of `build.semantics.drop_classes` (default people/animals and sky)
+  are left out of the map altogether.
+- The `voxels` stage also writes `labels.ply`, the voxels colored by class.
+- The `semantic` stage writes `semantic.asc`: per cell, the class of the
+  highest labeled voxel (1 ground ... 6 dynamic), i.e. what's seen from above.
+- `semantics.min_votes` is how many votes a voxel's class needs (fewer leave it
+  unknown); `vg mcap stats` shows the share of each class in a recording.
+
+Recordings without labels map as before, with the `semantic` stage skipped.
 
 `.asc` files are ESRI ASCII grids: plain text, a six-line header (size,
 lower-left corner, cell size, no-data value) and then one value per cell, top

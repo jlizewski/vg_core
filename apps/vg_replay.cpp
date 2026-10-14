@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
 
   try {
     params.apply_args({args.begin() + 2, args.end()});
-    vg::config::check_stages(config.pipeline);
+    config.validate();
   } catch (const vg::config::ConfigError& e) {
     std::cerr << "vg_replay: " << e.what() << "\n";
     return 2;

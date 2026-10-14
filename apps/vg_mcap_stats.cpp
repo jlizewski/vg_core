@@ -215,6 +215,21 @@ int main(int argc, char** argv) {
                   << "%, 128-191 " << percent(c[2], depth.valid()) << "%, 192-255 "
                   << percent(c[3], depth.valid()) << "%\n";
       }
+      if (depth.frames_with_labels() == 0) {
+        std::cout << "  no semantic labels recorded (no /cam/<name>/depth/labels)\n";
+      } else {
+        std::size_t labeled = 0;
+        for (const std::size_t n : depth.by_label()) {
+          labeled += n;
+        }
+        std::cout << "  semantic labels in " << depth.frames_with_labels() << " frames ("
+                  << percent(depth.frames_with_labels(), depth.frames()) << "%):";
+        for (std::size_t c = 0; c < vg::kSemanticClasses; ++c) {
+          std::cout << ' ' << vg::semantic_class_name(static_cast<vg::SemanticClass>(c)) << ' '
+                    << percent(depth.by_label()[c], labeled) << '%';
+        }
+        std::cout << "\n";
+      }
 
       // How far each depth frame is from the closest pose.
       std::vector<double> offsets;

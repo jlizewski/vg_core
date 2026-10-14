@@ -9,6 +9,7 @@
 #include <limits>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include "vg_core/sensor_data.hpp"
 
@@ -98,6 +99,34 @@ inline DepthFrame render_depth(const Scene& scene, const Eigen::Isometry3d& worl
     }
   }
   return frame;
+}
+
+// Semantic labels for render_depth()'s image: the box as box_label, the
+// ground as ground_label, nothing hit as 0 (unknown).
+inline std::vector<std::uint8_t> render_labels(const Scene& scene,
+                                               const Eigen::Isometry3d& world_from_camera,
+                                               std::uint8_t ground_label, std::uint8_t box_label,
+                                               const CameraIntrinsics& k = test_intrinsics()) {
+  const Scene ground_only;
+  std::vector<std::uint8_t> labels(static_cast<std::size_t>(k.width) *
+                                       static_cast<std::size_t>(k.height),
+                                   0);
+  for (int v = 0; v < k.height; ++v) {
+    for (int u = 0; u < k.width; ++u) {
+      const Eigen::Vector3d ray((u - k.cx) / k.fx, (v - k.cy) / k.fy, 1.0);
+      const Eigen::Vector3d origin = world_from_camera.translation();
+      const Eigen::Vector3d dir = world_from_camera.linear() * ray;
+      const auto t = scene.intersect(origin, dir);
+      if (!t) {
+        continue;
+      }
+      const auto t_ground = ground_only.intersect(origin, dir);
+      const bool on_box = !t_ground || *t < *t_ground - 1e-9;
+      labels[static_cast<std::size_t>(v) * static_cast<std::size_t>(k.width) +
+             static_cast<std::size_t>(u)] = on_box ? box_label : ground_label;
+    }
+  }
+  return labels;
 }
 
 }  // namespace vg::test

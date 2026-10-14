@@ -276,6 +276,13 @@ std::string encode_confidence(const DepthImage& depth) {
       .data();
 }
 
+std::string encode_labels(const DepthImage& depth) {
+  const DepthFrame& d = depth.frame;
+  return raw_image(d.timestamp, camera_frame(depth.camera), d.intrinsics, "mono8", 1,
+                   bytes_of(d.labels.data(), d.labels.size()))
+      .data();
+}
+
 RawImage decode_raw_image(std::string_view data) {
   RawImage image;
   ProtoReader r(data);
@@ -346,6 +353,13 @@ std::vector<float> depth_from_raw(const RawImage& image) {
 std::vector<std::uint8_t> confidence_from_raw(const RawImage& image) {
   if (image.encoding != "mono8" && image.encoding != "8UC1") {
     throw std::runtime_error("session: unsupported confidence encoding " + image.encoding);
+  }
+  return unpack_rows<std::uint8_t>(image);
+}
+
+std::vector<std::uint8_t> labels_from_raw(const RawImage& image) {
+  if (image.encoding != "mono8" && image.encoding != "8UC1") {
+    throw std::runtime_error("session: unsupported label encoding " + image.encoding);
   }
   return unpack_rows<std::uint8_t>(image);
 }

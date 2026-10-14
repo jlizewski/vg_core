@@ -29,7 +29,7 @@ namespace vg::config {
 
 // The derived stages run_stages() knows, in their natural order.
 inline const std::vector<std::string> kStages = {"voxels", "surface", "ground", "sun",
-                                                 "layers"};
+                                                 "semantic", "layers"};
 
 struct MappingConfig {
   // The defaults, as vg replay uses them.
@@ -49,6 +49,11 @@ struct MappingConfig {
   // BuildOptions, which picks the automatic value).
   double min_blob_volume = MapPackage::kDefaultMinBlobVolume;
 
+  // build.semantics: classes whose readings are left out of the map (names,
+  // see semantics.hpp); semantics: votes a voxel's class needs to count.
+  std::vector<std::string> drop_classes;
+  int min_label_votes = 2;
+
   // maps, ground, sun, layers.
   std::optional<double> cell_size;
   GroundConfig ground;
@@ -58,6 +63,9 @@ struct MappingConfig {
 
   // Derived stages vg replay runs after the build, in order.
   std::vector<std::string> pipeline;
+
+  // Throws ConfigError if a setting names an unknown stage or class.
+  void validate() const;
 
   // The options each part of the pipeline takes, with automatic values
   // worked out.
@@ -79,8 +87,8 @@ bool is_build_setting(const std::string& path);
 void check_stages(const std::vector<std::string>& stages);
 
 // Runs the named derived stages on package in order, with config's voxel
-// read-out settings. Returns false if a stage was skipped (it logs why, e.g.
-// the sun stage without a location).
+// read-out settings. Returns false if the sun stage was skipped (it logs why:
+// no location). The semantic stage skipping a map without labels is fine.
 bool run_stages(MapPackage& package, const MappingConfig& config,
                 const std::vector<std::string>& stages);
 

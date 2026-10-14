@@ -9,8 +9,8 @@
 # adding a setting.
 
 # Derived stages vg replay runs after building the 3D map, in order (and vg
-# map's `all`). Stages: voxels, surface, ground, sun, layers.
-pipeline: [voxels, surface, ground, sun]
+# map's `all`). Stages: voxels, surface, ground, sun, semantic, layers.
+pipeline: [voxels, surface, ground, sun, semantic]
 
 # The map package as a whole.
 map:
@@ -89,6 +89,16 @@ build:
     min_translation: 0.03
     # ... and than this, in degrees.
     min_rotation: 3
+  # Semantic labels recorded with the depth (depth/labels, from a segmentation
+  # model).
+  semantics:
+    # Count, per voxel, the classes it was seen as, so the map knows what things
+    # are.
+    label_votes: true
+    # Readings labeled with these classes are left out of the map: people and
+    # animals move, and depth on the sky is noise. Classes: unknown, ground,
+    # plant, tree, structure, sky, dynamic.
+    drop_classes: [dynamic, sky]
 
 # Reading the 3D map out for every derived map. vg map can re-tune these without
 # a rebuild.
@@ -146,6 +156,11 @@ sun:
   sample_height: auto
   # The sun counts only when at least this many degrees up.
   min_elevation_deg: 0
+
+# Reading the semantic labels out (labels.ply, semantic.asc).
+semantics:
+  # Votes a voxel's class needs to count; with fewer it's unknown.
+  min_votes: 2
 
 # Diagnostic: where a second surface sits over the first (ghosts).
 layers:

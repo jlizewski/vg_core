@@ -1,15 +1,21 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <cmath>
 #include <filesystem>
 #include <future>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "test_scene.hpp"
+#include "vg_core/height_map_io.hpp"
+#include "vg_core/io/map_build.hpp"
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
 #include "vg_core/io/session_writer.hpp"
+#include "vg_core/map_package.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace {
 
@@ -200,6 +206,40 @@ TEST(SessionIo, ReadsDepthWithoutConfidence) {
   EXPECT_TRUE(d.frame.confidence.empty());
   EXPECT_EQ(d.frame.depth, depth.frame.depth);
   EXPECT_TRUE(std::holds_alternative<vg::ImuSample>(messages[2]));
+}
+
+TEST(SessionIo, RoundTripsSemanticLabels) {
+  TempFile file("vg_session_labels");
+  vg::io::DepthImage depth;
+  depth.camera = "rgb";
+  depth.frame.timestamp = 7 * kMs;
+  depth.frame.intrinsics = {3, 1, 1.0, 1.0, 1.0, 0.0};
+  depth.frame.depth = {1.0f, 2.0f, 3.0f};
+  depth.frame.confidence = {255, 128, 0};
+  depth.frame.labels = {static_cast<std::uint8_t>(vg::SemanticClass::Ground),
+                        static_cast<std::uint8_t>(vg::SemanticClass::Structure),
+                        static_cast<std::uint8_t>(vg::SemanticClass::Sky)};
+  vg::io::DepthImage unlabeled = depth;
+  unlabeled.frame.timestamp = 8 * kMs;
+  unlabeled.frame.labels.clear();
+  {
+    vg::io::SessionWriter writer(file.path(), test_info());
+    writer.write(depth);
+    writer.write(unlabeled);
+  }
+  const auto messages = read_all(file.path());
+  ASSERT_EQ(messages.size(), 3u);
+  const auto& d = std::get<vg::io::DepthImage>(messages[1]);
+  EXPECT_EQ(d.frame.labels, depth.frame.labels);
+  EXPECT_EQ(d.frame.confidence, depth.frame.confidence);
+  const auto& u = std::get<vg::io::DepthImage>(messages[2]);
+  EXPECT_TRUE(u.frame.labels.empty());
+  EXPECT_EQ(u.frame.confidence, depth.frame.confidence);
+
+  // Labels must match the depth image's size.
+  vg::io::SessionWriter writer(file.path(), test_info());
+  depth.frame.labels.pop_back();
+  EXPECT_THROW(writer.write(depth), std::invalid_argument);
 }
 
 TEST(SessionIo, RejectsMismatchedDepthSize) {
@@ -439,6 +479,91 @@ TEST(SessionMapper, ReplayedSessionBuildsHeightMap) {
   };
   EXPECT_NEAR(height_at(0.5, 0.0), 0.3, 0.03);
   EXPECT_NEAR(height_at(-0.4, 0.0), 0.0, 0.03);
+}
+
+TEST(MapPackage, LabeledSessionBuildsSemanticMaps) {
+  // A recording with semantic labels, as the phone writes them: the bed
+  // labeled structure, the ground ground, and a person standing in the yard.
+  TempFile file("vg_session_semantic");
+  const auto dir = std::filesystem::temp_directory_path() / "vg_semantic_package";
+  std::filesystem::remove_all(dir);
+  vg::test::Scene scene;
+  scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.8, 0.3, 0.3}};
+  vg::test::Scene person;
+  person.box = vg::test::Box{{-0.6, 0.4, 0.0}, {-0.4, 0.6, 1.0}};
+  const auto ground = static_cast<std::uint8_t>(vg::SemanticClass::Ground);
+  std::size_t person_pixels = 0;
+  {
+    vg::io::SessionWriter writer(file.path(), test_info());
+    const Eigen::Vector3d target(0.3, 0.0, 0.0);
+    vg::Timestamp t = 100 * kMs;
+    for (const Eigen::Vector3d& eye :
+         {Eigen::Vector3d(0.0, 0.0, 1.5), Eigen::Vector3d(-1.0, -0.5, 1.4),
+          Eigen::Vector3d(1.5, -0.5, 1.2)}) {
+      const Eigen::Isometry3d pose_now = look_at(eye, target, Eigen::Vector3d::UnitZ());
+      vg::PoseStamped pose;
+      pose.timestamp = t;
+      pose.world_from_frame = pose_now;
+      writer.write(pose);
+      vg::io::DepthImage depth;
+      depth.camera = "rgb";
+      // The bed and the person, each labeled; where both are hit the nearer wins.
+      depth.frame = render_depth(scene, pose_now);
+      const auto person_depth = render_depth(person, pose_now);
+      const auto bed_labels = vg::test::render_labels(
+          scene, pose_now, ground, static_cast<std::uint8_t>(vg::SemanticClass::Structure));
+      const auto person_labels = vg::test::render_labels(
+          person, pose_now, ground, static_cast<std::uint8_t>(vg::SemanticClass::Dynamic));
+      depth.frame.labels = bed_labels;
+      for (std::size_t i = 0; i < depth.frame.depth.size(); ++i) {
+        if (person_depth.depth[i] > 0.0f &&
+            (depth.frame.depth[i] <= 0.0f || person_depth.depth[i] < depth.frame.depth[i]) &&
+            person_labels[i] == static_cast<std::uint8_t>(vg::SemanticClass::Dynamic)) {
+          depth.frame.depth[i] = person_depth.depth[i];
+          depth.frame.labels[i] = person_labels[i];
+          ++person_pixels;
+        }
+      }
+      depth.frame.timestamp = t;
+      writer.write(depth);
+      t += 33 * kMs;
+    }
+  }
+
+  ASSERT_GT(person_pixels, 100u);  // The person is in view.
+
+  vg::io::BuildOptions options;
+  options.builder.tsdf.max_depth = 2.5;
+  options.builder.tsdf.voxel_size = 0.0762;
+  options.builder.tsdf.truncation_distance = 3 * 0.0762;
+  options.builder.tsdf.drop_labels = vg::mask_of(vg::SemanticClass::Dynamic);
+  options.remove_pose_jumps = false;  // The synthetic views are far apart.
+  options.min_weight = 0.0f;
+  std::ostringstream log;
+  vg::io::build_map_package(file.path(), dir, options, log);
+  vg::MapPackage package(dir, log);
+  package.set_min_label_votes(1);
+  package.make_voxels();
+  ASSERT_TRUE(package.make_semantic()) << log.str();
+
+  EXPECT_TRUE(std::filesystem::exists(dir / vg::package_file::kLabels));
+  const auto map = vg::load_height_map(dir / vg::package_file::kSemantic);
+  const auto class_at = [&map](double x, double y) {
+    const int cx = static_cast<int>(std::floor((x - map.origin.x()) / map.cell_size));
+    const int cy = static_cast<int>(std::floor((y - map.origin.y()) / map.cell_size));
+    return static_cast<vg::SemanticClass>(static_cast<int>(map.at(cx, cy)));
+  };
+  EXPECT_EQ(class_at(0.5, 0.0), vg::SemanticClass::Structure);
+  EXPECT_EQ(class_at(-0.3, -0.3), vg::SemanticClass::Ground);
+  // The person was dropped: the ground where they stood is ground or unseen.
+  for (int y = 0; y < map.height; ++y) {
+    for (int x = 0; x < map.width; ++x) {
+      if (map.has_data(x, y)) {
+        EXPECT_NE(static_cast<int>(map.at(x, y)), static_cast<int>(vg::SemanticClass::Dynamic));
+      }
+    }
+  }
+  std::filesystem::remove_all(dir);
 }
 
 }  // namespace

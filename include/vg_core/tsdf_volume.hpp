@@ -10,6 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "vg_core/semantics.hpp"
 #include "vg_core/sensor_data.hpp"
 
 namespace vg {
@@ -52,6 +53,12 @@ struct TsdfConfig {
   // every carve_stride-th pixel in each direction; carving never allocates.
   bool carve = false;
   int carve_stride = 4;
+  // Semantic labels (DepthFrame::labels, when a frame has them): count, per
+  // voxel near the surface, the classes it was seen as, so the map knows
+  // what things are. Readings labeled with a class in drop_labels (e.g.
+  // people) are left out of the map altogether.
+  bool label_votes = true;
+  SemanticMask drop_labels = 0;
   // Threads that fuse a frame's blocks in parallel; 0 uses all hardware
   // threads. Results are the same for any count.
   int threads = 1;
@@ -125,6 +132,21 @@ class TsdfVolume {
   const Block* find_block(const Eigen::Vector3i& index) const;
   Block& insert_block(const Eigen::Vector3i& index);
 
+  // Label votes: per voxel, how many times it was seen as each class
+  // (saturating; halved together when one would overflow, so ratios hold).
+  // Only blocks fused from labeled frames have them.
+  using LabelVotes = std::array<std::uint8_t, kSemanticClasses>;
+  using LabelBlock = std::array<LabelVotes, kBlockSize * kBlockSize * kBlockSize>;
+  bool has_labels() const { return !labels_.empty(); }
+  const LabelBlock* find_labels(const Eigen::Vector3i& block_index) const;
+  LabelBlock& insert_labels(const Eigen::Vector3i& block_index);
+  std::vector<Eigen::Vector3i> label_block_indices() const;
+  // The voxel's votes; all zero if it has none.
+  LabelVotes votes_at(const Eigen::Vector3i& voxel) const;
+  // The class most votes say the voxel is, if it has at least min_votes
+  // (counting every class but unknown).
+  std::optional<SemanticClass> label_of(const Eigen::Vector3i& voxel, int min_votes = 1) const;
+
  private:
 
   struct IndexHash {
@@ -134,8 +156,8 @@ class TsdfVolume {
   Eigen::Vector3i voxel_index(const Eigen::Vector3d& point) const;
   Eigen::Vector3d voxel_center(const Eigen::Vector3i& voxel) const;
   const Voxel* find_voxel(const Eigen::Vector3i& voxel) const;
-  void integrate_block(const Eigen::Vector3i& block_index, Block& block, const DepthFrame& frame,
-                       const std::vector<float>& weights,
+  void integrate_block(const Eigen::Vector3i& block_index, Block& block, LabelBlock* labels,
+                       const DepthFrame& frame, const std::vector<float>& weights,
                        const Eigen::Isometry3d& camera_from_world);
   void append_surface_points(const Eigen::Vector3i& block_index, const Block& block,
                              std::vector<Eigen::Vector3d>& points) const;
@@ -145,6 +167,7 @@ class TsdfVolume {
   TsdfConfig config_;
   std::unordered_map<Eigen::Vector3i, Block, IndexHash> blocks_;
   std::unordered_set<Eigen::Vector3i, IndexHash> changed_;
+  std::unordered_map<Eigen::Vector3i, LabelBlock, IndexHash> labels_;
 };
 
 }  // namespace vg

@@ -38,6 +38,10 @@ struct DepthFrame {
   // Optional per-pixel confidence, 0 (none) to 255 (full). Empty if the source
   // has none; otherwise the same size as depth.
   std::vector<std::uint8_t> confidence;
+  // Optional per-pixel semantic class (a vg::SemanticClass value, see
+  // semantics.hpp), from a segmentation model. Empty if unlabeled; otherwise
+  // the same size as depth.
+  std::vector<std::uint8_t> labels;
 
   std::size_t index(int u, int v) const {
     return static_cast<std::size_t>(v) * static_cast<std::size_t>(intrinsics.width) +

@@ -74,7 +74,18 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
     filter.max_incidence_deg = config_.max_incidence_deg;
     filtered = filter_depth(raw, filter);
   }
+  if (config_.drop_labels != 0 && raw.labels.size() == raw.depth.size()) {
+    if (!filtered) {
+      filtered = raw;
+    }
+    for (std::size_t i = 0; i < filtered->depth.size(); ++i) {
+      if (filtered->labels[i] < 32 && (config_.drop_labels >> filtered->labels[i]) & 1u) {
+        filtered->depth[i] = 0.0f;
+      }
+    }
+  }
   const DepthFrame& frame = filtered ? *filtered : raw;
+  const bool labeled = config_.label_votes && frame.labels.size() == frame.depth.size();
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
   const double block_edge = config_.voxel_size * kBlockSize;
@@ -132,10 +143,15 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
 
   // Blocks are fused independently, so they can be split across threads.
   // Allocating first keeps the hash map untouched while workers run.
-  std::vector<std::pair<Eigen::Vector3i, Block*>> work;
+  struct Work {
+    Eigen::Vector3i index;
+    Block* block;
+    LabelBlock* labels;
+  };
+  std::vector<Work> work;
   work.reserve(touched.size());
   for (const Eigen::Vector3i& index : touched) {
-    work.emplace_back(index, &blocks_[index]);
+    work.push_back({index, &blocks_[index], labeled ? &labels_[index] : nullptr});
     changed_.insert(index);
   }
   // Per-pixel weights, when they aren't all 1.
@@ -167,7 +183,8 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
   std::atomic<std::size_t> next{0};
   const auto fuse = [&]() {
     for (std::size_t w = next++; w < work.size(); w = next++) {
-      integrate_block(work[w].first, *work[w].second, frame, weights, camera_from_world);
+      integrate_block(work[w].index, *work[w].block, work[w].labels, frame, weights,
+                      camera_from_world);
     }
   };
   const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
@@ -185,7 +202,8 @@ void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world
 }
 
 void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& block,
-                                 const DepthFrame& frame, const std::vector<float>& weights,
+                                 LabelBlock* labels, const DepthFrame& frame,
+                                 const std::vector<float>& weights,
                                  const Eigen::Isometry3d& camera_from_world) {
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
@@ -224,6 +242,19 @@ void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& bloc
         const float w = voxel.weight;
         voxel.tsdf = (voxel.tsdf * w + tsdf * sample) / (w + sample);
         voxel.weight = std::min(w + sample, config_.max_weight);
+
+        // A vote for what the voxel is, from readings of a surface near it
+        // (not from space seen through in front of one).
+        const std::uint8_t label = labels != nullptr ? frame.labels[i] : 0;
+        if (label != 0 && label < kSemanticClasses && sdf <= trunc) {
+          LabelVotes& votes = (*labels)[linear_index(local)];
+          if (votes[label] == 255) {
+            for (auto& count : votes) {
+              count = static_cast<std::uint8_t>(count / 2);
+            }
+          }
+          ++votes[label];
+        }
       }
     }
   }
@@ -251,6 +282,52 @@ const TsdfVolume::Block* TsdfVolume::find_block(const Eigen::Vector3i& index) co
 TsdfVolume::Block& TsdfVolume::insert_block(const Eigen::Vector3i& index) {
   changed_.insert(index);
   return blocks_[index];
+}
+
+const TsdfVolume::LabelBlock* TsdfVolume::find_labels(const Eigen::Vector3i& block_index) const {
+  const auto it = labels_.find(block_index);
+  return it == labels_.end() ? nullptr : &it->second;
+}
+
+TsdfVolume::LabelBlock& TsdfVolume::insert_labels(const Eigen::Vector3i& block_index) {
+  return labels_[block_index];
+}
+
+std::vector<Eigen::Vector3i> TsdfVolume::label_block_indices() const {
+  std::vector<Eigen::Vector3i> indices;
+  indices.reserve(labels_.size());
+  for (const auto& entry : labels_) {
+    indices.push_back(entry.first);
+  }
+  std::sort(indices.begin(), indices.end(), [](const Eigen::Vector3i& a, const Eigen::Vector3i& b) {
+    if (a.z() != b.z()) return a.z() < b.z();
+    if (a.y() != b.y()) return a.y() < b.y();
+    return a.x() < b.x();
+  });
+  return indices;
+}
+
+TsdfVolume::LabelVotes TsdfVolume::votes_at(const Eigen::Vector3i& voxel) const {
+  const Eigen::Vector3i block = block_of(voxel);
+  const LabelBlock* labels = find_labels(block);
+  return labels == nullptr ? LabelVotes{} : (*labels)[linear_index(voxel - block * kBlockSize)];
+}
+
+std::optional<SemanticClass> TsdfVolume::label_of(const Eigen::Vector3i& voxel,
+                                                  int min_votes) const {
+  const LabelVotes votes = votes_at(voxel);
+  int total = 0;
+  std::size_t best = 0;
+  for (std::size_t c = 1; c < votes.size(); ++c) {  // Class 0 is unknown.
+    total += votes[c];
+    if (votes[c] > votes[best]) {
+      best = c;
+    }
+  }
+  if (votes[best] == 0 || total < std::max(1, min_votes)) {
+    return std::nullopt;
+  }
+  return static_cast<SemanticClass>(best);
 }
 
 std::optional<double> TsdfVolume::distance_at(const Eigen::Vector3d& point) const {

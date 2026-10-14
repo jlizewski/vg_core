@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <stdexcept>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace vg {
@@ -50,19 +52,16 @@ std::uint8_t lerp(int a, int b, double t) {
 
 }  // namespace
 
-void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
-                      std::ostream& out) {
+namespace {
+
+// Writes the cubes, each voxel colored by color(voxel).
+void write_cubes(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
+                 const std::function<std::array<std::uint8_t, 3>(const Eigen::Vector3i&)>& color,
+                 std::ostream& out) {
   const std::unordered_set<Eigen::Vector3i, Hash> occupied(voxels.begin(), voxels.end());
 
   std::size_t faces = 0;
-  int min_z = 0;
-  int max_z = 0;
-  if (!occupied.empty()) {
-    min_z = max_z = occupied.begin()->z();
-  }
   for (const Eigen::Vector3i& v : occupied) {
-    min_z = std::min(min_z, v.z());
-    max_z = std::max(max_z, v.z());
     for (int face = 0; face < 6; ++face) {
       if (occupied.count(v + face_normal(face)) == 0) {
         ++faces;
@@ -80,10 +79,8 @@ void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_s
       << "property list uchar int vertex_indices\n"
       << "end_header\n";
 
-  const double z_range = std::max(1, max_z - min_z);
   for (const Eigen::Vector3i& v : occupied) {
-    const double t = (v.z() - min_z) / z_range;
-    const std::uint8_t rgb[3] = {lerp(121, 76, t), lerp(85, 160, t), lerp(58, 60, t)};
+    const std::array<std::uint8_t, 3> rgb = color(v);
     for (int face = 0; face < 6; ++face) {
       if (occupied.count(v + face_normal(face)) != 0) {
         continue;
@@ -93,7 +90,7 @@ void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_s
           put(out,
               static_cast<float>((v[axis] + corner[static_cast<std::size_t>(axis)]) * voxel_size));
         }
-        out.write(reinterpret_cast<const char*>(rgb), 3);
+        out.write(reinterpret_cast<const char*>(rgb.data()), 3);
       }
     }
   }
@@ -107,17 +104,67 @@ void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_s
   }
 }
 
-void save_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
-                     const std::filesystem::path& path) {
+void open_and_write(const std::filesystem::path& path,
+                    const std::function<void(std::ostream&)>& write) {
   std::ofstream out(path, std::ios::binary);
   if (!out) {
     throw std::runtime_error("voxel map: cannot open " + path.string() + " for writing");
   }
-  write_voxels_ply(voxels, voxel_size, out);
+  write(out);
   out.flush();
   if (!out) {
     throw std::runtime_error("voxel map: failed writing " + path.string());
   }
+}
+
+}  // namespace
+
+void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
+                      std::ostream& out) {
+  int min_z = 0;
+  int max_z = 0;
+  if (!voxels.empty()) {
+    min_z = max_z = voxels.front().z();
+  }
+  for (const Eigen::Vector3i& v : voxels) {
+    min_z = std::min(min_z, v.z());
+    max_z = std::max(max_z, v.z());
+  }
+  const double z_range = std::max(1, max_z - min_z);
+  write_cubes(
+      voxels, voxel_size,
+      [&](const Eigen::Vector3i& v) {
+        const double t = (v.z() - min_z) / z_range;
+        return std::array<std::uint8_t, 3>{lerp(121, 76, t), lerp(85, 160, t), lerp(58, 60, t)};
+      },
+      out);
+}
+
+void write_voxels_ply(const std::vector<Eigen::Vector3i>& voxels,
+                      const std::vector<std::array<std::uint8_t, 3>>& colors, double voxel_size,
+                      std::ostream& out) {
+  if (colors.size() != voxels.size()) {
+    throw std::invalid_argument("voxel map: one color per voxel is needed");
+  }
+  std::unordered_map<Eigen::Vector3i, std::array<std::uint8_t, 3>, Hash> color_of;
+  color_of.reserve(voxels.size());
+  for (std::size_t i = 0; i < voxels.size(); ++i) {
+    color_of[voxels[i]] = colors[i];
+  }
+  write_cubes(
+      voxels, voxel_size, [&](const Eigen::Vector3i& v) { return color_of.at(v); }, out);
+}
+
+void save_voxels_ply(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
+                     const std::filesystem::path& path) {
+  open_and_write(path, [&](std::ostream& out) { write_voxels_ply(voxels, voxel_size, out); });
+}
+
+void save_voxels_ply(const std::vector<Eigen::Vector3i>& voxels,
+                     const std::vector<std::array<std::uint8_t, 3>>& colors, double voxel_size,
+                     const std::filesystem::path& path) {
+  open_and_write(path,
+                 [&](std::ostream& out) { write_voxels_ply(voxels, colors, voxel_size, out); });
 }
 
 }  // namespace vg

@@ -102,6 +102,7 @@ producers convert to the conventions above before writing.
 | `/cam/<name>/depth` | `foxglove.RawImage`, encoding `16UC1` (millimeters) or `32FC1` (meters) | Registered to `cam/<name>`. 0 / NaN means no data. |
 | `/cam/<name>/depth/calibration` | `foxglove.CameraCalibration` | Intrinsics of the depth image. Needed when they differ from the color image (usual on ARCore/ARKit); vg_core_io always writes it, again whenever it changes. |
 | `/cam/<name>/depth/confidence` | `foxglove.RawImage`, encoding `mono8` | 0 = none, 255 = full. ARKit's low/medium/high map to 0/128/255. |
+| `/cam/<name>/depth/labels` | `foxglove.RawImage`, encoding `mono8` | Semantic class of each depth pixel, from a segmentation model run on the color image closest in time: 0 unknown, 1 ground (lawn, soil, mulch, paths), 2 plant, 3 tree, 4 structure (house, walls, fences, decks, sheds), 5 sky, 6 dynamic (people, animals); see `include/vg_core/semantics.hpp`. Same size and timestamp as its depth image, written after it (and its confidence); readers look a few messages ahead for it, so a recorder segmenting on another thread may let others in between. Frames without labels are fine. |
 | `/pose` | `foxglove.PoseInFrame` | Pose of `body` in `world` from the platform tracker (VIO). |
 | `/pose/status` | `vg.TrackingStatus` | Tracker state, so vg_core can drop poses taken while tracking was limited or lost. |
 | `/geo_pose` | `vg.GeoPose` | Optional. ARCore Geospatial / ARKit geo tracking output. |
@@ -110,7 +111,7 @@ producers convert to the conventions above before writing.
 
 | Source | Raw | Derived |
 | --- | --- | --- |
-| vg_android (ARCore) | `rgb` image, IMU, GPS, calibration from `Camera.getImageIntrinsics()` | Depth from the Depth API (+ confidence), pose from `Frame.getAndroidSensorPose()` / camera pose, tracking state |
+| vg_android (ARCore) | `rgb` image, IMU, GPS, calibration from `Camera.getImageIntrinsics()` | Raw depth from the Depth API (+ confidence), semantic labels (planned: an on-device model), pose from `Frame.getAndroidSensorPose()` / camera pose, tracking state |
 | iOS (ARKit) | `capturedImage`, CoreMotion IMU, CoreLocation GPS, `ARCamera.intrinsics` | `sceneDepth` + `confidenceMap` on LiDAR devices, `ARCamera.transform`, `trackingState` |
 | Stereo + IMU + GPS rig | `left` + `right` images, IMU, GPS, full stereo calibration | Only if the camera SDK provides depth / VIO (ZED, RealSense, OAK-D) |
 
