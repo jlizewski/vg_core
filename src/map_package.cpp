@@ -34,7 +34,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 9> kFiles = {{
+constexpr std::array<FileInfo, 10> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -43,6 +43,8 @@ constexpr std::array<FileInfo, 9> kFiles = {{
     {package_file::kSunHours, "h", "Hours of direct sun per ground cell over the year"},
     {package_file::kSunEnergy, "kWh/m^2",
      "Clear-sky direct solar energy per ground cell over the year"},
+    {package_file::kConfig, "",
+     "Settings the package was made with: edit and re-run stages with vg map"},
     {package_file::kTrajectory, "s, m",
      "Path of the depth camera while mapping: time from the first reading, x, y, z"},
     {package_file::kLayers, "m",
@@ -203,6 +205,16 @@ StageSettings& StageSettings::add(const std::string& key, double value) {
   return *this;
 }
 
+StageSettings& StageSettings::add(const std::string& key, float value) {
+  // A float's own precision, so 0.05f reads 0.05.
+  std::ostringstream out;
+  out.imbue(std::locale::classic());
+  out.precision(7);
+  out << value;
+  entries_.emplace_back(key, std::isfinite(value) ? out.str() : "null");
+  return *this;
+}
+
 StageSettings& StageSettings::add(const std::string& key, int value) {
   entries_.emplace_back(key, std::to_string(value));
   return *this;
@@ -304,7 +316,7 @@ void MapPackage::make_voxels() {
   save_voxels_ply(occupied(), voxel_size, path(package_file::kVoxels));
   update_manifest(dir_, map_.metadata, voxel_size, "voxels",
                   StageSettings()
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_weight", map_.volume.config().min_weight)
                       .add("min_blob_m3", min_blob_volume_)
                       .add("voxels", occupied().size()));
   log_ << "voxels: " << occupied().size() << " occupied -> " << package_file::kVoxels << " ("
@@ -343,7 +355,7 @@ void MapPackage::make_surface(const SurfaceOptions& options) {
   update_manifest(dir_, map_.metadata, map_.volume.config().voxel_size, "surface",
                   StageSettings()
                       .add("cell_size_m", cell_size)
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_weight", map_.volume.config().min_weight)
                       .add("min_blob_m3", min_blob_volume_));
   log_ << "surface: " << map.width << " x " << map.height << " cells -> "
        << package_file::kSurface << " (" << seconds_since(start) << " s)\n";
@@ -372,7 +384,7 @@ void MapPackage::make_ground(const GroundOptions& options) {
   update_manifest(dir_, map_.metadata, voxel_size, "ground",
                   StageSettings()
                       .add("cell_size_m", config.cell_size)
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_weight", map_.volume.config().min_weight)
                       .add("min_blob_m3", min_blob_volume_)
                       .add("max_slope", config.max_slope)
                       .add("step_tolerance_m", config.step_tolerance)
@@ -435,6 +447,7 @@ bool MapPackage::make_sun(const SunOptions& options) {
   const double voxel_size = map_.volume.config().voxel_size;
   SunMapConfig config = sun_map_config_for_year(options.year, options.step_minutes * 60.0);
   config.sample_height = options.sample_height.value_or(std::max(0.04, voxel_size));
+  config.min_elevation_deg = options.min_elevation_deg;
   const HeightMap ground = load_height_map(path(package_file::kGround));
   // Everything mapped casts shadows: objects, and the ground itself on slopes.
   const SunMap sun = compute_sun_map(ground, occupied(), voxel_size, *geo, config);
@@ -444,7 +457,7 @@ bool MapPackage::make_sun(const SunOptions& options) {
   update_manifest(dir_, map_.metadata, voxel_size, "sun",
                   StageSettings()
                       .add("year", options.year)
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_weight", map_.volume.config().min_weight)
                       .add("min_blob_m3", min_blob_volume_)
                       .add("step_minutes", options.step_minutes)
                       .add("sample_height_m", config.sample_height)
@@ -460,16 +473,17 @@ bool MapPackage::make_sun(const SunOptions& options) {
   return true;
 }
 
-void MapPackage::make_layers(const SurfaceOptions& options) {
+void MapPackage::make_layers(const LayersOptions& options) {
   const auto start = std::chrono::steady_clock::now();
   const double cell_size = options.cell_size.value_or(map_.metadata.cell_size);
   const double voxel_size = map_.volume.config().voxel_size;
-  const SurfaceLayers layers = find_surface_layers(occupied(), voxel_size, cell_size);
+  const SurfaceLayers layers =
+      find_surface_layers(occupied(), voxel_size, cell_size, options.min_gap_voxels);
   save_height_map(layers.gap, path(package_file::kLayers));
   update_manifest(dir_, map_.metadata, voxel_size, "layers",
                   StageSettings()
                       .add("cell_size_m", cell_size)
-                      .add("min_weight", static_cast<double>(map_.volume.config().min_weight))
+                      .add("min_weight", map_.volume.config().min_weight)
                       .add("min_blob_m3", min_blob_volume_)
                       .add("columns", layers.columns)
                       .add("layered_columns", layers.layered_columns)

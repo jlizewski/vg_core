@@ -18,6 +18,8 @@ option(VG_CORE_BUILD_TESTS "Build vg_core unit tests" ${_vg_core_tests_default})
 option(VG_CORE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(VG_CORE_BUILD_IO "Build vg_core_io (capture session recording and playback)" ON)
 option(VG_CORE_BUILD_APPS "Build command-line apps such as vg_replay" ${_vg_core_tests_default})
+option(VG_CORE_BUILD_CONFIG
+  "Build vg_core_config (mapping settings in YAML files; needs vg_core_io)" ON)
 
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -78,6 +80,20 @@ if(VG_CORE_BUILD_IO)
   set_target_properties(vg_core_io PROPERTIES CXX_EXTENSIONS OFF)
   vg_core_set_warnings(vg_core_io)
 
+  # Mapping settings: every tunable parameter of the map package pipeline,
+  # read from YAML files and command-line flags. Kept out of vg_core so the
+  # mapping library has no YAML dependency.
+  if(VG_CORE_BUILD_CONFIG OR VG_CORE_BUILD_APPS)
+    include(cmake/ConfigDependencies.cmake)
+    add_library(vg_core_config
+      src/config/mapping_config.cpp
+      src/config/params.cpp)
+    add_library(vg_core::vg_core_config ALIAS vg_core_config)
+    target_link_libraries(vg_core_config PUBLIC vg_core_io PRIVATE yaml-cpp::yaml-cpp)
+    set_target_properties(vg_core_config PROPERTIES CXX_EXTENSIONS OFF)
+    vg_core_set_warnings(vg_core_config)
+  endif()
+
   # Each apps/vg_<name>.cpp is a target vg_<name>, which the Python tools run
   # as `vg <name>` (underscores become subcommand words: vg_mcap_repair is
   # `vg mcap repair`). See tools/vg_tools/apps.py.
@@ -86,7 +102,7 @@ if(VG_CORE_BUILD_IO)
     foreach(source ${_vg_core_apps})
       get_filename_component(app ${source} NAME_WE)
       add_executable(${app} ${source})
-      target_link_libraries(${app} PRIVATE vg_core_io)
+      target_link_libraries(${app} PRIVATE vg_core_config)
       vg_core_set_warnings(${app})
     endforeach()
   endif()

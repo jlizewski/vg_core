@@ -16,8 +16,9 @@
 
 namespace vg::io {
 
-void build_map_package(const std::filesystem::path& session, const std::filesystem::path& dir,
-                       const BuildOptions& options, std::ostream& log) {
+BuildSummary build_map_package(const std::filesystem::path& session,
+                               const std::filesystem::path& dir, const BuildOptions& options,
+                               std::ostream& log) {
   const auto start = std::chrono::steady_clock::now();
   MapBuilderConfig config = options.builder;
   config.height_cell_size = options.cell_size;
@@ -36,7 +37,7 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
   std::vector<GpsFix> fixes;
   std::vector<PoseStamped> poses;
   std::optional<Timestamp> first_reading;
-  PoseJumpFilter jumps;
+  PoseJumpFilter jumps(options.pose_jumps);
   std::vector<std::pair<double, Eigen::Vector3d>> camera_path;
   std::size_t outside_window = 0;
   std::size_t frames_with_confidence = 0;
@@ -135,7 +136,7 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
       .add("edge_ratio", tsdf.edge_ratio)
       .add("max_incidence_deg", tsdf.max_incidence_deg)
       .add("quality_weights", tsdf.quality_weights)
-      .add("min_weight", static_cast<double>(min_weight))
+      .add("min_weight", min_weight)
       .add("depth_with_confidence", frames_with_confidence)
       .add("carve", tsdf.carve)
       .add("carve_stride", tsdf.carve_stride)
@@ -163,6 +164,7 @@ void build_map_package(const std::filesystem::path& session, const std::filesyst
   for (const auto& [t, position] : camera_path) {
     path_file << t << ',' << position.x() << ',' << position.y() << ',' << position.z() << '\n';
   }
+  return {min_weight, confidence};
 }
 
 }  // namespace vg::io

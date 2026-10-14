@@ -1,160 +1,71 @@
 // vg_replay: build the full map package (3D map, surface, ground, objects, sun) from a recording.
 //
-//   vg_replay <session.mcap> <package_dir> [options]
+//   vg_replay <session.mcap> <package_dir> [--config FILE] [--set PATH=VALUE] [flags]
 //
-// Replays the session into the 3D voxel map and derives every other map from
-// it, writing the package described in vg_core/map_package.hpp:
+// Replays the session into the 3D voxel map, then runs the derived stages
+// listed in the `pipeline` setting, writing the package described in
+// vg_core/map_package.hpp. Any earlier package in package_dir is replaced.
 //
-//   map.vgm voxels.ply surface.asc ground.asc objects.ply sun_hours.asc
-//   sun_energy.asc manifest.json
-//
-// Any earlier package in package_dir is replaced. To re-run a derived stage
-// with new settings without replaying, use vg_map on the package.
+// Settings come from config/mapping.yaml's defaults, then each --config file,
+// --set and flag in order (vg_core/config/mapping_config.hpp). The package
+// keeps the settings it was made with in config.yaml; to re-run a derived
+// stage with new settings without replaying, use vg_map.
 //
 // The sun stage needs to know where the map is: from the session's GPS, or
-// --lat/--lon. Without either it's skipped and the rest is still written.
+// sun.latitude/longitude. Without either it's skipped and the rest is still
+// written.
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
 #include <exception>
 #include <iostream>
-#include <optional>
 #include <string>
+#include <vector>
 
-#include "package_options.hpp"
+#include "vg_core/config/mapping_config.hpp"
 #include "vg_core/io/map_build.hpp"
 #include "vg_core/map_package.hpp"
 
 namespace {
 
-constexpr double kInch = 0.0254;
-constexpr double kDegree = 3.14159265358979323846 / 180.0;
-
-int usage() {
-  std::cerr
-      << "usage: vg_replay <session.mcap> <package_dir> [options]\n"
-         "build stage:\n"
-         "  --resolution M         cell size of the 2D maps (default 0.1524 = 6 in)\n"
-         "  --voxel M              3D voxel size (default resolution / 2)\n"
-         "  --trunc M              TSDF truncation distance (default 3 voxels)\n"
-         "  --max-depth M          ignore depth readings farther than this (default 3.5)\n"
-         "  --min-confidence C     ignore readings less confident than this, 0-255, when the\n"
-         "                         depth has confidence (default 0)\n"
-         "  --edge-ratio R         ignore depth edges: a jump to a neighbor of more than R x\n"
-         "                         depth (default 0.05; 0 keeps them)\n"
-         "  --max-angle DEG        ignore surfaces seen more than this from head-on (default 75;\n"
-         "                         90 keeps them)\n"
-         "  --weights 0|1          weight readings by confidence, range and angle (default 1)\n"
-         "  --min-weight W         fused weight a voxel needs to be mapped (default 0.05 for\n"
-         "                         depth with confidence, else 0.5)\n"
-         "  --carve 0|1            mark space seen through as empty, erasing floating blobs\n"
-         "                         (default 1)\n"
-         "  --carve-stride N       carve along the rays of every Nth depth pixel (default 4)\n"
-         "  --stride N             place blocks from every Nth depth pixel (default 2)\n"
-         "  --keyframe-dist M      fuse a frame only after moving this far (default 0: every\n"
-         "                         frame; fewer frames build faster but average out less noise)\n"
-         "  --keyframe-angle DEG   ... or turning this much (default 0)\n"
-         "  --rate R               playback speed: 0 as fast as possible (default), 1 real time\n"
-         "  --fix-jumps 0|1        undo the tracker's pose jumps, which map as ghost copies\n"
-         "                         (default 1)\n"
-         "  --from S --to S        fuse only depth taken in this window, in seconds from the\n"
-         "                         first sensor reading (times as vg mcap stats prints them)\n"
-      << vg::app::kStageOptionsHelp;
+int usage(const vg::config::ParamSet& params) {
+  std::cerr << "usage: vg_replay <session.mcap> <package_dir> [settings]\n"
+            << params.flags_help();
   return 2;
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc < 3) {
-    return usage();
+  vg::config::MappingConfig config;
+  vg::config::ParamSet params = vg::config::bind(config);
+  const std::vector<std::string> args(argv + 1, argv + argc);
+  if (args.size() < 2 || args[0] == "--help" || args[0] == "-h") {
+    return usage(params);
   }
-  const std::string session_path = argv[1];
-  const std::string package_dir = argv[2];
-
-  vg::io::BuildOptions build;
-  build.builder.tsdf.max_depth = 3.5;
-  build.builder.tsdf.edge_ratio = 0.05;
-  build.builder.tsdf.max_incidence_deg = 75.0;
-  build.builder.tsdf.quality_weights = true;
-  build.builder.tsdf.carve = true;
-  build.builder.tsdf.pixel_stride = 2;
-  build.builder.tsdf.threads = 0;
-  build.builder.keyframe_translation = 0.0;
-  build.builder.keyframe_rotation = 0.0;
-  build.builder.drop_non_keyframes = true;
-  double resolution = 6.0 * kInch;
-  std::optional<double> voxel;
-  std::optional<double> trunc;
-  vg::app::StageOptions stages;
-
-  for (int i = 3; i < argc; ++i) {
-    const std::string arg = argv[i];
-    if (i + 1 >= argc) {
-      return usage();
-    }
-    const char* text = argv[++i];
-    const double value = std::atof(text);
-    if (arg == "--resolution") {
-      resolution = value;
-    } else if (arg == "--voxel") {
-      voxel = value;
-    } else if (arg == "--trunc") {
-      trunc = value;
-    } else if (arg == "--max-depth") {
-      build.builder.tsdf.max_depth = value;
-    } else if (arg == "--min-confidence") {
-      build.builder.tsdf.min_confidence =
-          static_cast<std::uint8_t>(std::clamp(value, 0.0, 255.0));
-    } else if (arg == "--edge-ratio") {
-      build.builder.tsdf.edge_ratio = value;
-    } else if (arg == "--max-angle") {
-      build.builder.tsdf.max_incidence_deg = value;
-    } else if (arg == "--weights") {
-      build.builder.tsdf.quality_weights = value != 0.0;
-    } else if (arg == "--min-weight") {
-      build.min_weight = static_cast<float>(value);
-    } else if (arg == "--carve") {
-      build.builder.tsdf.carve = value != 0.0;
-    } else if (arg == "--carve-stride") {
-      build.builder.tsdf.carve_stride = static_cast<int>(value);
-    } else if (arg == "--stride") {
-      build.builder.tsdf.pixel_stride = static_cast<int>(value);
-    } else if (arg == "--keyframe-dist") {
-      build.builder.keyframe_translation = value;
-    } else if (arg == "--keyframe-angle") {
-      build.builder.keyframe_rotation = value * kDegree;
-    } else if (arg == "--fix-jumps") {
-      build.remove_pose_jumps = value != 0.0;
-    } else if (arg == "--from") {
-      build.from = value;
-    } else if (arg == "--to") {
-      build.to = value;
-    } else if (arg == "--rate") {
-      build.rate = value;
-    } else if (!stages.parse(arg, text)) {
-      return usage();
-    }
-  }
-  if (!(resolution > 0.0)) {
-    std::cerr << "vg_replay: --resolution must be positive\n";
-    return 2;
-  }
-  // Two voxels per cell edge keeps thin things (stems, posts, edging) in the
-  // 3D map while the 2D maps stay at the resolution asked for.
-  build.builder.tsdf.voxel_size = voxel.value_or(resolution / 2.0);
-  build.builder.tsdf.truncation_distance = trunc.value_or(3.0 * build.builder.tsdf.voxel_size);
-  build.cell_size = resolution;
+  const std::string session_path = args[0];
+  const std::string package_dir = args[1];
 
   try {
-    vg::io::build_map_package(session_path, package_dir, build, std::cout);
+    params.apply_args({args.begin() + 2, args.end()});
+    vg::config::check_stages(config.pipeline);
+  } catch (const vg::config::ConfigError& e) {
+    std::cerr << "vg_replay: " << e.what() << "\n";
+    return 2;
+  }
+
+  try {
+    const vg::io::BuildOptions build = config.build_options();
+    const vg::io::BuildSummary summary =
+        vg::io::build_map_package(session_path, package_dir, build, std::cout);
+    // Record what was worked out, so config.yaml says what the map was made with.
+    config.voxel_size = build.builder.tsdf.voxel_size;
+    config.truncation = build.builder.tsdf.truncation_distance;
+    config.build.min_weight = summary.min_weight;
+    config.year = config.sun_options().year;
+
     vg::MapPackage package(package_dir, std::cout);
-    stages.apply(package);
-    package.make_voxels();
-    package.make_surface(stages.surface);
-    package.make_ground(stages.ground);
-    package.make_sun(stages.sun);
+    vg::config::run_stages(package, config, config.pipeline);
+    vg::config::save_settings(params, package.dir() / vg::package_file::kConfig,
+                              vg::config::kPackageHeader);
     std::cout << "map package written to " << package_dir << "\n";
   } catch (const std::exception& e) {
     std::cerr << "vg_replay: " << e.what() << "\n";
