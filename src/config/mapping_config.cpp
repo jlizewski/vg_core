@@ -5,6 +5,7 @@
 #include <fstream>
 #include <limits>
 
+#include "vg_core/semantics.hpp"
 #include "vg_core/solar.hpp"
 
 namespace vg::config {
@@ -38,11 +39,39 @@ MappingConfig::MappingConfig() {
   tsdf.pixel_stride = 2;
   tsdf.threads = 0;
   build.builder.drop_non_keyframes = true;
-  pipeline = {"voxels", "surface", "ground", "sun"};
+  pipeline = {"voxels", "surface", "ground", "sun", "semantic"};
+  drop_classes = {"dynamic", "sky"};
+}
+
+namespace {
+
+SemanticMask class_mask(const std::vector<std::string>& names) {
+  SemanticMask mask = 0;
+  for (const std::string& name : names) {
+    const auto c = parse_semantic_class(name);
+    if (!c) {
+      std::string known;
+      for (std::size_t i = 0; i < kSemanticClasses; ++i) {
+        known += (known.empty() ? "" : ", ") +
+                 std::string(semantic_class_name(static_cast<SemanticClass>(i)));
+      }
+      throw ConfigError("unknown semantic class " + name + " (classes: " + known + ")");
+    }
+    mask |= mask_of(*c);
+  }
+  return mask;
+}
+
+}  // namespace
+
+void MappingConfig::validate() const {
+  check_stages(pipeline);
+  class_mask(drop_classes);
 }
 
 io::BuildOptions MappingConfig::build_options() const {
   io::BuildOptions options = build;
+  options.builder.tsdf.drop_labels = class_mask(drop_classes);
   options.cell_size = resolution;
   options.builder.tsdf.voxel_size = voxel_size.value_or(resolution / 2.0);
   options.builder.tsdf.truncation_distance =
@@ -80,7 +109,7 @@ ParamSet bind(MappingConfig& c) {
 
   p.add("pipeline", c.pipeline,
         "Derived stages vg replay runs after building the 3D map, in order (and vg map's "
-        "`all`). Stages: voxels, surface, ground, sun, layers.",
+        "`all`). Stages: voxels, surface, ground, sun, semantic, layers.",
         "--pipeline");
 
   p.section("map", "The map package as a whole.");
@@ -164,6 +193,15 @@ ParamSet bind(MappingConfig& c) {
   p.add_degrees("build.pose_jumps.min_rotation", c.build.pose_jumps.min_rotation,
                 "... and than this, in degrees.");
 
+  p.section("build.semantics",
+            "Semantic labels recorded with the depth (depth/labels, from a segmentation model).");
+  p.add("build.semantics.label_votes", tsdf.label_votes,
+        "Count, per voxel, the classes it was seen as, so the map knows what things are.");
+  p.add("build.semantics.drop_classes", c.drop_classes,
+        "Readings labeled with these classes are left out of the map: people and animals "
+        "move, and depth on the sky is noise. Classes: unknown, ground, plant, tree, "
+        "structure, sky, dynamic.");
+
   p.section("voxels",
             "Reading the 3D map out for every derived map. vg map can re-tune these without a "
             "rebuild.");
@@ -224,6 +262,10 @@ ParamSet bind(MappingConfig& c) {
   p.add("sun.min_elevation_deg", c.sun.min_elevation_deg,
         "The sun counts only when at least this many degrees up.");
 
+  p.section("semantics", "Reading the semantic labels out (labels.ply, semantic.asc).");
+  p.add("semantics.min_votes", c.min_label_votes,
+        "Votes a voxel's class needs to count; with fewer it's unknown.");
+
   p.section("layers", "Diagnostic: where a second surface sits over the first (ghosts).");
   p.add("layers.min_gap_voxels", c.layers.min_gap_voxels,
         "Runs of voxels separated by fewer empty voxels than this count as one surface.");
@@ -253,6 +295,7 @@ bool run_stages(MapPackage& package, const MappingConfig& config,
     package.set_min_weight(*config.build.min_weight);
   }
   package.set_min_blob_volume(config.min_blob_volume);
+  package.set_min_label_votes(config.min_label_votes);
   bool all_ran = true;
   for (const std::string& stage : stages) {
     if (stage == "voxels") {
@@ -263,6 +306,9 @@ bool run_stages(MapPackage& package, const MappingConfig& config,
       package.make_ground(config.ground_options());
     } else if (stage == "sun") {
       all_ran = package.make_sun(config.sun_options()) && all_ran;
+    } else if (stage == "semantic") {
+      // Skipped without labels (e.g. an older recording); not a failure.
+      package.make_semantic(config.surface_options());
     } else if (stage == "layers") {
       package.make_layers(config.layers_options());
     }

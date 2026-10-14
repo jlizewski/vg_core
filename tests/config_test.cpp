@@ -13,6 +13,7 @@
 
 #include "vg_core/config/mapping_config.hpp"
 #include "vg_core/config/params.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace {
 
@@ -191,6 +192,20 @@ TEST(MappingConfig, StagesAndBuildSettingsAreKnown) {
   EXPECT_TRUE(vg::config::is_build_setting("map.resolution"));
   EXPECT_FALSE(vg::config::is_build_setting("voxels.min_weight"));
   EXPECT_FALSE(vg::config::is_build_setting("ground.max_slope"));
+}
+
+TEST(MappingConfig, SemanticClassesByName) {
+  vg::config::MappingConfig config;
+  EXPECT_NO_THROW(config.validate());
+  EXPECT_EQ(config.build_options().builder.tsdf.drop_labels,
+            vg::mask_of(vg::SemanticClass::Dynamic) | vg::mask_of(vg::SemanticClass::Sky));
+
+  ParamSet p = vg::config::bind(config);
+  p.apply_args({"--set", "build.semantics.drop_classes=[]"});
+  EXPECT_EQ(config.build_options().builder.tsdf.drop_labels, 0u);
+  p.apply_args({"--set", "build.semantics.drop_classes=peeple"});
+  const auto error = error_of([&] { config.validate(); });
+  EXPECT_NE(error.find("unknown semantic class peeple"), std::string::npos) << error;
 }
 
 }  // namespace

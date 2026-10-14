@@ -18,6 +18,8 @@ std::string encode(const CameraImage& image);
 std::string encode_depth(const DepthImage& depth);
 // Confidence as mono8. Requires depth.frame.confidence to be non-empty.
 std::string encode_confidence(const DepthImage& depth);
+// Semantic labels as mono8. Requires depth.frame.labels to be non-empty.
+std::string encode_labels(const DepthImage& depth);
 std::string encode(const PoseStamped& pose);
 std::string encode(const TrackingStatus& status);
 std::string encode(const ImuSample& imu);
@@ -42,6 +44,7 @@ RawImage decode_raw_image(std::string_view data);
 std::vector<float> depth_from_raw(const RawImage& image);
 // Converts a mono8 image.
 std::vector<std::uint8_t> confidence_from_raw(const RawImage& image);
+std::vector<std::uint8_t> labels_from_raw(const RawImage& image);
 
 PoseStamped decode_pose(std::string_view data);
 TrackingStatus decode_tracking_status(std::string_view data);

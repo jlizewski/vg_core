@@ -36,6 +36,7 @@ add_library(vg_core
   src/map_builder.cpp
   src/map_package.cpp
   src/pose_jumps.cpp
+  src/semantics.cpp
   src/solar.cpp
   src/sun_map.cpp
   src/tsdf_volume.cpp

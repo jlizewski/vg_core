@@ -30,7 +30,7 @@ namespace {
 
 int usage(const vg::config::ParamSet& params) {
   std::cerr << "usage: vg_map <package_dir> <stage>... [settings]\n"
-               "stages: voxels, surface, ground, sun, layers, or all (the pipeline setting)\n"
+               "stages: voxels, surface, ground, sun, semantic, layers, or all (the pipeline setting)\n"
             << params.flags_help();
   return 2;
 }
@@ -79,7 +79,7 @@ int main(int argc, char** argv) {
     if (std::find(stages.begin(), stages.end(), "all") != stages.end()) {
       stages = config.pipeline;
     }
-    vg::config::check_stages(config.pipeline);
+    config.validate();
     vg::config::check_stages(stages);
   } catch (const vg::config::ConfigError& e) {
     std::cerr << "vg_map: " << e.what() << "\n";

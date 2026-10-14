@@ -5,13 +5,15 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
 
 namespace vg {
 namespace {
 
 constexpr std::array<char, 8> kMagic = {'V', 'G', 'M', 'A', 'P', '\0', '\0', '\0'};
 // Version 2 added the quality weighting and minimum weight.
-constexpr std::uint32_t kVersion = 2;
+// Version 3 added the semantic label votes.
+constexpr std::uint32_t kVersion = 3;
 
 // Values are copied as raw bytes: little-endian on all supported hosts.
 template <typename T>
@@ -89,6 +91,20 @@ void write_map(const TsdfVolume& volume, const MapMetadata& metadata, std::ostre
       put(out, voxel.weight);
     }
   }
+
+  // Label votes: the number of classes, then each labeled block.
+  put(out, static_cast<std::uint8_t>(kSemanticClasses));
+  const auto label_indices = volume.label_block_indices();
+  put(out, static_cast<std::uint64_t>(label_indices.size()));
+  for (const Eigen::Vector3i& index : label_indices) {
+    put(out, static_cast<std::int32_t>(index.x()));
+    put(out, static_cast<std::int32_t>(index.y()));
+    put(out, static_cast<std::int32_t>(index.z()));
+    for (const TsdfVolume::LabelVotes& votes : *volume.find_labels(index)) {
+      out.write(reinterpret_cast<const char*>(votes.data()),
+                static_cast<std::streamsize>(votes.size()));
+    }
+  }
 }
 
 SavedMap read_map(std::istream& in) {
@@ -141,6 +157,26 @@ SavedMap read_map(std::istream& in) {
     for (TsdfVolume::Voxel& voxel : block) {
       voxel.tsdf = get<float>(in);
       voxel.weight = get<float>(in);
+    }
+  }
+  if (version >= 3) {
+    // Classes beyond those this build knows are dropped; missing ones are 0.
+    const std::size_t classes = get<std::uint8_t>(in);
+    const auto label_blocks = get<std::uint64_t>(in);
+    std::vector<std::uint8_t> counts(classes);
+    for (std::uint64_t b = 0; b < label_blocks; ++b) {
+      const int x = get<std::int32_t>(in);
+      const int y = get<std::int32_t>(in);
+      const int z = get<std::int32_t>(in);
+      TsdfVolume::LabelBlock& labels = map.volume.insert_labels({x, y, z});
+      for (TsdfVolume::LabelVotes& votes : labels) {
+        for (auto& count : counts) {
+          count = get<std::uint8_t>(in);
+        }
+        for (std::size_t c = 0; c < votes.size(); ++c) {
+          votes[c] = c < classes ? counts[c] : std::uint8_t{0};
+        }
+      }
     }
   }
   // Nothing has changed since the map was saved.

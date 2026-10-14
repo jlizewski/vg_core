@@ -71,6 +71,7 @@ void DepthSpool::push(const std::string& camera, const DepthFrame& frame,
   stored.depth_mm.resize(frame.depth.size());
   std::transform(frame.depth.begin(), frame.depth.end(), stored.depth_mm.begin(), to_millimeters);
   stored.confidence = frame.confidence;
+  stored.labels = frame.labels;
 
   if (path_.empty()) {
     memory_.push_back(std::move(stored));
@@ -83,6 +84,7 @@ void DepthSpool::push(const std::string& camera, const DepthFrame& frame,
     out_.write(reinterpret_cast<const char*>(matrix.data()), sizeof(double) * 16);
     write_vector(out_, stored.depth_mm);
     write_vector(out_, stored.confidence);
+    write_vector(out_, stored.labels);
     if (!out_) {
       throw std::runtime_error("Could not write to depth spool " + path_);
     }
@@ -122,6 +124,7 @@ std::optional<DepthSpool::Entry> DepthSpool::pop() {
   stored.world_from_camera.matrix() = matrix;
   read_vector(in_, stored.depth_mm);
   read_vector(in_, stored.confidence);
+  read_vector(in_, stored.labels);
   if (!in_) {
     throw std::runtime_error("Could not read back depth spool " + path_);
   }
@@ -140,6 +143,7 @@ DepthSpool::Entry DepthSpool::to_entry(Stored stored) {
   std::transform(stored.depth_mm.begin(), stored.depth_mm.end(), entry.frame.depth.begin(),
                  [](std::uint16_t mm) { return static_cast<float>(mm) * 0.001f; });
   entry.frame.confidence = std::move(stored.confidence);
+  entry.frame.labels = std::move(stored.labels);
   return entry;
 }
 

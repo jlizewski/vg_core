@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     vg::config::ParamSet params = vg::config::bind(config);
     try {
       params.apply_args({args.begin() + 1, args.end()});
-      vg::config::check_stages(config.pipeline);
+      config.validate();
     } catch (const vg::config::ConfigError& e) {
       std::cerr << "vg_config: " << e.what() << "\n";
       return 2;
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
       vg::config::ParamSet params = vg::config::bind(config);
       try {
         params.load_yaml_file(args[i]);
-        vg::config::check_stages(config.pipeline);
+        config.validate();
         std::cout << args[i] << ": ok\n";
       } catch (const vg::config::ConfigError& e) {
         std::cout << e.what() << "\n";

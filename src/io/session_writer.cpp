@@ -124,8 +124,10 @@ void SessionWriter::write(const DepthImage& depth) {
   const std::size_t pixels = static_cast<std::size_t>(frame.intrinsics.width) *
                              static_cast<std::size_t>(frame.intrinsics.height);
   if (frame.depth.size() != pixels ||
-      (!frame.confidence.empty() && frame.confidence.size() != pixels)) {
-    throw std::invalid_argument("session: depth or confidence size doesn't match intrinsics");
+      (!frame.confidence.empty() && frame.confidence.size() != pixels) ||
+      (!frame.labels.empty() && frame.labels.size() != pixels)) {
+    throw std::invalid_argument(
+        "session: depth, confidence or label size doesn't match intrinsics");
   }
 
   auto last = impl_->depth_calibrations.find(depth.camera);
@@ -141,6 +143,10 @@ void SessionWriter::write(const DepthImage& depth) {
   if (!frame.confidence.empty()) {
     impl_->write(camera_topic(depth.camera, "/depth/confidence"), "foxglove.RawImage",
                  frame.timestamp, detail::encode_confidence(depth));
+  }
+  if (!frame.labels.empty()) {
+    impl_->write(camera_topic(depth.camera, "/depth/labels"), "foxglove.RawImage",
+                 frame.timestamp, detail::encode_labels(depth));
   }
 }
 

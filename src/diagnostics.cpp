@@ -52,6 +52,8 @@ void DepthStats::add(const DepthFrame& frame) {
   height_ = k.height;
   const bool has_confidence = !frame.confidence.empty();
   frames_with_confidence_ += has_confidence ? 1 : 0;
+  const bool has_labels = frame.labels.size() == frame.depth.size() && !frame.labels.empty();
+  frames_with_labels_ += has_labels ? 1 : 0;
   pixels_ += frame.depth.size();
   for (int v = 0; v < k.height; ++v) {
     for (int u = 0; u < k.width; ++u) {
@@ -65,6 +67,9 @@ void DepthStats::add(const DepthFrame& frame) {
       ++valid_by_range_[band];
       if (is_depth_edge(frame, u, v, edge_ratio_)) {
         ++edges_by_range_[band];
+      }
+      if (has_labels && frame.labels[i] < kSemanticClasses) {
+        ++by_label_[frame.labels[i]];
       }
       if (has_confidence) {
         ++by_confidence_[static_cast<std::size_t>(frame.confidence[i] / 64)];

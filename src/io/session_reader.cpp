@@ -1,6 +1,7 @@
 #include "vg_core/io/session_reader.hpp"
 
 #include <algorithm>
+#include <deque>
 #include <map>
 #include <mcap/reader.hpp>
 #include <stdexcept>
@@ -12,14 +13,22 @@
 namespace vg::io {
 namespace {
 
-// Depth confidence, kept internal until it's attached to its depth image.
-struct Confidence {
+// A per-pixel image that belongs to a depth image (its confidence or its
+// semantic labels), kept internal until it's attached to it.
+struct DepthExtra {
+  enum class Kind { Confidence, Labels };
+  Kind kind = Kind::Confidence;
   std::string camera;
   Timestamp timestamp = 0;
   std::vector<std::uint8_t> values;
 };
 
-using Decoded = std::variant<SessionMessage, Confidence>;
+using Decoded = std::variant<SessionMessage, DepthExtra>;
+
+// How many messages after a depth image are searched for its extras. The
+// writer puts them right after it, but a recorder that segments the image
+// on another thread may let a few other messages in between.
+constexpr std::size_t kExtrasLookahead = 16;
 
 // How far out of log-time order messages may be in a file read without its
 // index. Writers buffer sensors separately (vg_android's IMU arrives in
@@ -49,7 +58,7 @@ struct SessionReader::Impl {
   mcap::McapReader reader;
   std::optional<mcap::LinearMessageView> view;
   std::optional<mcap::LinearMessageView::Iterator> it;
-  std::optional<Decoded> pending;
+  std::deque<Decoded> ahead;  // Decoded but not yet returned.
   bool indexed = true;
   // Without an index: decoded messages waiting to be sorted into time order,
   // and the newest log time seen so far.
@@ -153,7 +162,12 @@ struct SessionReader::Impl {
     }
     if (kind == "depth/confidence") {
       const RawImage raw = decode_raw_image(data);
-      return Confidence{camera, raw.timestamp, confidence_from_raw(raw)};
+      return DepthExtra{DepthExtra::Kind::Confidence, camera, raw.timestamp,
+                        confidence_from_raw(raw)};
+    }
+    if (kind == "depth/labels") {
+      const RawImage raw = decode_raw_image(data);
+      return DepthExtra{DepthExtra::Kind::Labels, camera, raw.timestamp, labels_from_raw(raw)};
     }
     return std::nullopt;
   }
@@ -214,31 +228,44 @@ bool SessionReader::indexed() const { return impl_->indexed; }
 
 std::optional<SessionMessage> SessionReader::next() {
   Impl& d = *impl_;
-  for (;;) {
-    std::optional<Decoded> m;
-    if (d.pending) {
-      m = std::move(d.pending);
-      d.pending.reset();
-    } else {
-      m = d.next_raw();
+  const auto take = [&d]() -> std::optional<Decoded> {
+    if (!d.ahead.empty()) {
+      Decoded m = std::move(d.ahead.front());
+      d.ahead.pop_front();
+      return m;
     }
+    return d.next_raw();
+  };
+  for (;;) {
+    std::optional<Decoded> m = take();
     if (!m) {
       return std::nullopt;
     }
-    if (std::holds_alternative<Confidence>(*m)) {
-      continue;  // Confidence without a matching depth image.
+    if (std::holds_alternative<DepthExtra>(*m)) {
+      continue;  // Confidence or labels without a matching depth image.
     }
     SessionMessage message = std::get<SessionMessage>(std::move(*m));
     if (auto* depth = std::get_if<DepthImage>(&message)) {
-      // The writer puts confidence right after its depth image.
-      d.pending = d.next_raw();
-      if (d.pending) {
-        if (auto* c = std::get_if<Confidence>(&*d.pending);
-            c != nullptr && c->camera == depth->camera && c->timestamp == depth->frame.timestamp &&
-            c->values.size() == depth->frame.depth.size()) {
-          depth->frame.confidence = std::move(c->values);
-          d.pending.reset();
+      // Its confidence and labels follow it, usually right after.
+      while (d.ahead.size() < kExtrasLookahead) {
+        std::optional<Decoded> next = d.next_raw();
+        if (!next) {
+          break;
         }
+        d.ahead.push_back(std::move(*next));
+      }
+      for (auto it = d.ahead.begin(); it != d.ahead.end();) {
+        auto* extra = std::get_if<DepthExtra>(&*it);
+        if (extra == nullptr || extra->camera != depth->camera ||
+            extra->timestamp != depth->frame.timestamp ||
+            extra->values.size() != depth->frame.depth.size()) {
+          ++it;
+          continue;
+        }
+        auto& target = extra->kind == DepthExtra::Kind::Confidence ? depth->frame.confidence
+                                                                   : depth->frame.labels;
+        target = std::move(extra->values);
+        it = d.ahead.erase(it);
       }
     }
     return message;

@@ -58,6 +58,7 @@ class DepthSpool {
     Eigen::Isometry3d world_from_camera = Eigen::Isometry3d::Identity();
     std::vector<std::uint16_t> depth_mm;
     std::vector<std::uint8_t> confidence;
+    std::vector<std::uint8_t> labels;
   };
 
   static Entry to_entry(Stored stored);

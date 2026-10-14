@@ -5,6 +5,8 @@
 //
 //   map.vgm         the 3D map (TSDF volume + geo-reference), see volume_io.hpp
 //   voxels.ply      its occupied voxels, for viewing        <- voxels stage
+//   labels.ply      the same, colored by semantic class      <- voxels stage, when labeled
+//   semantic.asc    class of the top labeled voxel per cell  <- semantic stage
 //   surface.asc     top surface height per cell (m)        <- surface stage
 //   ground.asc      bare ground height per cell (m)        <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
@@ -44,6 +46,8 @@ inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
 inline constexpr const char* kLayers = "layers.asc";
 inline constexpr const char* kTrajectory = "trajectory.csv";
+inline constexpr const char* kLabels = "labels.ply";
+inline constexpr const char* kSemantic = "semantic.asc";
 inline constexpr const char* kConfig = "config.yaml";
 inline constexpr const char* kManifest = "manifest.json";
 }  // namespace package_file
@@ -127,10 +131,20 @@ class MapPackage {
   // many cubic meters, are left out of every stage run after this (0 keeps
   // them). They're mostly left by noisy depth.
   void set_min_blob_volume(double volume);
+
+  // Votes a voxel needs before its semantic class counts (labels.ply,
+  // semantic.asc); fewer leave it unknown.
+  void set_min_label_votes(int votes) { min_label_votes_ = votes; }
   static constexpr double kDefaultMinBlobVolume = 0.01;
 
-  // voxels.ply: the occupied voxels, for viewing.
+  // voxels.ply: the occupied voxels, for viewing; and labels.ply, colored by
+  // semantic class, when the map has label votes.
   void make_voxels();
+
+  // semantic.asc: per cell, the semantic class (a SemanticClass value) of
+  // the highest occupied voxel with one, i.e. what's seen from above. Returns
+  // false, writing nothing, if the map has no labels.
+  bool make_semantic(const SurfaceOptions& options = {});
 
   // surface.asc: the highest surface point per cell.
   void make_surface(const SurfaceOptions& options = {});
@@ -158,6 +172,7 @@ class MapPackage {
   // Voxels left out as specks, for the stages that work from the TSDF.
   std::vector<Eigen::Vector3i> specks_;
   double min_blob_volume_ = kDefaultMinBlobVolume;
+  int min_label_votes_ = 2;
 };
 
 // Rewrites dir's manifest.json, recording settings for stage (replacing what

@@ -16,6 +16,7 @@
 #include "vg_core/diagnostics.hpp"
 #include "vg_core/height_map.hpp"
 #include "vg_core/height_map_io.hpp"
+#include "vg_core/semantics.hpp"
 #include "vg_core/sun_map.hpp"
 #include "vg_core/version.hpp"
 #include "vg_core/voxel_cleanup.hpp"
@@ -34,7 +35,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 10> kFiles = {{
+constexpr std::array<FileInfo, 12> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -47,13 +48,17 @@ constexpr std::array<FileInfo, 10> kFiles = {{
      "Settings the package was made with: edit and re-run stages with vg map"},
     {package_file::kTrajectory, "s, m",
      "Path of the depth camera while mapping: time from the first reading, x, y, z"},
+    {package_file::kLabels, "m", "Occupied voxels colored by semantic class"},
+    {package_file::kSemantic, "class",
+     "Semantic class of the highest labeled voxel per cell: 1 ground, 2 plant, 3 tree, "
+     "4 structure, 5 sky, 6 dynamic"},
     {package_file::kLayers, "m",
      "Diagnostic: gap from the lowest surface to a second one above it (ghosts if small)"},
 }};
 
 // Stages in the order they run, for the manifest.
-constexpr std::array<const char*, 6> kStages = {"build",  "voxels", "surface",
-                                                "ground", "sun",    "layers"};
+constexpr std::array<const char*, 8> kStages = {"build",  "voxels", "labels", "surface",
+                                                "ground", "sun",    "semantic", "layers"};
 
 std::string json_number(double value) {
   if (!std::isfinite(value)) {
@@ -321,6 +326,88 @@ void MapPackage::make_voxels() {
                       .add("voxels", occupied().size()));
   log_ << "voxels: " << occupied().size() << " occupied -> " << package_file::kVoxels << " ("
        << seconds_since(start) << " s)" << std::endl;
+  if (!map_.volume.has_labels()) {
+    return;
+  }
+  // The same voxels colored by class, and how many of each.
+  std::vector<std::array<std::uint8_t, 3>> colors;
+  colors.reserve(occupied().size());
+  std::array<std::size_t, kSemanticClasses> counts{};
+  for (const auto& v : occupied()) {
+    const SemanticClass c =
+        map_.volume.label_of(v, min_label_votes_).value_or(SemanticClass::Unknown);
+    colors.push_back(semantic_class_color(c));
+    ++counts[static_cast<std::size_t>(c)];
+  }
+  save_voxels_ply(occupied(), colors, voxel_size, path(package_file::kLabels));
+  StageSettings settings;
+  settings.add("min_label_votes", min_label_votes_);
+  log_ << "labels:";
+  for (std::size_t c = 0; c < kSemanticClasses; ++c) {
+    const std::string name(semantic_class_name(static_cast<SemanticClass>(c)));
+    settings.add(name + "_voxels", counts[c]);
+    log_ << ' ' << name << ' ' << counts[c];
+  }
+  update_manifest(dir_, map_.metadata, voxel_size, "labels", settings);
+  log_ << " -> " << package_file::kLabels << std::endl;
+}
+
+bool MapPackage::make_semantic(const SurfaceOptions& options) {
+  if (!map_.volume.has_labels()) {
+    log_ << "semantic: skipped, the map has no semantic labels (record depth/labels)"
+         << std::endl;
+    return false;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const double cell_size = options.cell_size.value_or(map_.metadata.cell_size);
+  const double voxel_size = map_.volume.config().voxel_size;
+  // Cells on the same global grid as the other maps.
+  const auto cell_of = [&](const Eigen::Vector3i& v) -> Eigen::Vector2i {
+    return {static_cast<int>(std::floor((v.x() + 0.5) * voxel_size / cell_size)),
+            static_cast<int>(std::floor((v.y() + 0.5) * voxel_size / cell_size))};
+  };
+  std::map<std::pair<int, int>, std::pair<int, SemanticClass>> top;  // Cell: (z, class).
+  for (const auto& v : occupied()) {
+    const auto label = map_.volume.label_of(v, min_label_votes_);
+    if (!label) {
+      continue;
+    }
+    const Eigen::Vector2i c = cell_of(v);
+    auto [it, added] = top.try_emplace({c.x(), c.y()}, v.z(), *label);
+    if (!added && v.z() > it->second.first) {
+      it->second = {v.z(), *label};
+    }
+  }
+  HeightMap map;
+  map.cell_size = cell_size;
+  if (!top.empty()) {
+    Eigen::Vector2i min(top.begin()->first.first, top.begin()->first.second);
+    Eigen::Vector2i max = min;
+    for (const auto& [cell, value] : top) {
+      min = min.cwiseMin(Eigen::Vector2i(cell.first, cell.second));
+      max = max.cwiseMax(Eigen::Vector2i(cell.first, cell.second));
+    }
+    map.origin = min.cast<double>() * cell_size;
+    map.width = max.x() - min.x() + 1;
+    map.height = max.y() - min.y() + 1;
+    map.heights.assign(static_cast<std::size_t>(map.width) * static_cast<std::size_t>(map.height),
+                       std::numeric_limits<float>::quiet_NaN());
+    for (const auto& [cell, value] : top) {
+      const auto x = static_cast<std::size_t>(cell.first - min.x());
+      const auto y = static_cast<std::size_t>(cell.second - min.y());
+      map.heights[y * static_cast<std::size_t>(map.width) + x] =
+          static_cast<float>(static_cast<int>(value.second));
+    }
+  }
+  save_height_map(map, path(package_file::kSemantic));
+  update_manifest(dir_, map_.metadata, voxel_size, "semantic",
+                  StageSettings()
+                      .add("cell_size_m", cell_size)
+                      .add("min_label_votes", min_label_votes_)
+                      .add("labeled_cells", top.size()));
+  log_ << "semantic: " << top.size() << " labeled cells -> " << package_file::kSemantic << " ("
+       << seconds_since(start) << " s)" << std::endl;
+  return true;
 }
 
 void MapPackage::make_surface(const SurfaceOptions& options) {
