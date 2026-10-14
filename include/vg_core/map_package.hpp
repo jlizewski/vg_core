@@ -12,6 +12,7 @@
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
 //   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
 //   trajectory.csv  the camera's path while mapping (t, x, y, z)  <- build
+//   config.yaml     the settings it was made with (vg_core/config/mapping_config.hpp)
 //   manifest.json   what each file is, and the settings each stage last ran with
 //
 // The 3D map is the core: it is built once from the recording (see
@@ -43,6 +44,7 @@ inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
 inline constexpr const char* kLayers = "layers.asc";
 inline constexpr const char* kTrajectory = "trajectory.csv";
+inline constexpr const char* kConfig = "config.yaml";
 inline constexpr const char* kManifest = "manifest.json";
 }  // namespace package_file
 
@@ -51,6 +53,7 @@ inline constexpr const char* kManifest = "manifest.json";
 class StageSettings {
  public:
   StageSettings& add(const std::string& key, double value);
+  StageSettings& add(const std::string& key, float value);
   StageSettings& add(const std::string& key, int value);
   StageSettings& add(const std::string& key, std::size_t value);
   StageSettings& add(const std::string& key, bool value);
@@ -86,6 +89,15 @@ struct SunOptions {
   // Height above the ground the sun rays start from, in meters; by default
   // one voxel, and at least 4 cm.
   std::optional<double> sample_height;
+  // The sun counts only when at least this high, in degrees.
+  double min_elevation_deg = 0.0;
+};
+
+struct LayersOptions {
+  // Cell size in meters; the package's if unset.
+  std::optional<double> cell_size;
+  // Runs of voxels separated by fewer empty voxels than this count as one.
+  int min_gap_voxels = 2;
 };
 
 // Starts a package in dir (created if needed) from a freshly built 3D map:
@@ -132,7 +144,7 @@ class MapPackage {
   bool make_sun(const SunOptions& options);
 
   // layers.asc: a diagnostic of ghost surfaces, see find_surface_layers().
-  void make_layers(const SurfaceOptions& options = {});
+  void make_layers(const LayersOptions& options = {});
 
  private:
   // All occupied voxels, sorted, computed once.

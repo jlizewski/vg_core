@@ -155,6 +155,7 @@ garden/
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
   trajectory.csv   the camera's path while mapping (t, x, y, z)
+  config.yaml      the settings it was made with: edit, then re-run stages with vg map
   manifest.json    what each file is, and the settings each stage last ran with
   *.png            previews of the .asc maps
 ```
@@ -169,32 +170,73 @@ vg map garden/ sun --x-bearing 15            # fix the map's heading
 vg map garden/ all --cell 0.1                # every 2D map at 10 cm
 ```
 
-The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`) and
-`sun`, which reads `ground.asc`, so re-run `sun` after `ground`. In code they're
-`vg::MapPackage` ([map_package.hpp](include/vg_core/map_package.hpp)), and the
-build stage is `vg::io::build_map_package()`.
+The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`),
+`sun`, which reads `ground.asc`, so re-run `sun` after `ground`, and the
+diagnostic `layers`. In code they're `vg::MapPackage`
+([map_package.hpp](include/vg_core/map_package.hpp)), and the build stage is
+`vg::io::build_map_package()`.
 
-`--resolution` (default 6 in, 0.1524 m) is the cell size of the 2D maps; the
-voxels are half that (`--voxel`) so thin things like stems and posts still
-show up. Phone depth is noisy, so the build cleans it up (`vg replay --help`
-lists every option):
+### Settings
 
-- **Depth filtering:** readings beyond 3.5 m (`--max-depth`), on depth edges
-  where they smear between two surfaces (`--edge-ratio`), and of surfaces seen
-  nearly edge-on (`--max-angle`) are dropped.
-- **Weighted fusion:** each reading counts by its confidence, 1/range² and
-  viewing angle (`--weights`), and a voxel needs a minimum fused weight to be
-  mapped (`--min-weight`, re-tunable later with `vg map --min-weight`). The
+Every tunable parameter of the pipeline is a setting in YAML:
+[config/mapping.yaml](config/mapping.yaml) lists them all, with their defaults
+and what they do. A settings file only needs what it changes:
+
+```yaml
+# garden.yaml
+build:
+  depth:
+    max_depth: 3.0
+ground:
+  max_slope: 0.6
+pipeline: [voxels, surface, ground, sun, layers]
+```
+
+```sh
+vg replay session.mcap garden/ --config garden.yaml   # files apply in order...
+vg replay session.mcap garden/ --set sun.year=2027    # ...then --set and flags
+vg config show --config garden.yaml                   # the settings that result
+vg config check garden.yaml                           # catch typos and bad values
+```
+
+Common settings also have short flags (`--max-slope 0.6`; `vg replay --help`
+lists them). Unknown keys are errors, with the nearest real one suggested.
+
+Each package keeps the settings it was made with in `config.yaml`, with
+automatic values (`auto`) filled in. `vg map` starts from it, so a re-run stage
+keeps its earlier settings: edit a section of `garden/config.yaml` and run
+`vg map garden/ ground`. `map` and `build` settings describe the saved 3D map,
+so `vg map` refuses to change them; rebuild with
+`vg replay session.mcap garden/ --config garden/config.yaml`.
+
+The settings live in `vg_core_config` (yaml-cpp), kept out of `vg_core` so the
+mapping library stays free of it. To add one, bind its field in
+[mapping_config.cpp](src/config/mapping_config.cpp) and regenerate the
+defaults file: `vg config defaults > config/mapping.yaml` (a test checks it's
+current).
+
+### What the build does
+
+`map.resolution` (default 6 in, 0.1524 m) is the cell size of the 2D maps; the
+voxels are half that (`build.voxel_size`) so thin things like stems and posts
+still show up. Phone depth is noisy, so the build cleans it up:
+
+- **Depth filtering** (`build.depth`): readings beyond 3.5 m, on depth edges
+  where they smear between two surfaces, and of surfaces seen nearly edge-on
+  are dropped.
+- **Weighted fusion** (`build.fusion`): each reading counts by its
+  confidence, 1/range² and viewing angle, and a voxel needs a minimum fused
+  weight to be mapped (`voxels.min_weight`, re-tunable with `vg map`). The
   default suits the depth: 0.05 for raw depth with confidence (most of
   ARCore's raw readings are low confidence, so weigh little), 0.5 for
-  smoothed depth without it. `--min-confidence` drops readings outright.
-- **Free-space carving:** space a frame sees through is marked empty, so a
-  blob from a bad reading fades out (`--carve`).
-- **Tracking jumps:** when ARCore snaps its pose to correct drift, the rest of
-  the walk is moved back into line (`--fix-jumps`); otherwise the ground
-  before and after a snap maps as two ghost layers.
-- **Specks:** groups of voxels on their own smaller than 0.01 m³ are left out
-  of every map (`--min-blob`, for `vg replay` and `vg map`).
+  smoothed depth without it.
+- **Free-space carving** (`build.fusion.carve`): space a frame sees through is
+  marked empty, so a blob from a bad reading fades out.
+- **Tracking jumps** (`build.pose_jumps`): when ARCore snaps its pose to
+  correct drift, the rest of the walk is moved back into line; otherwise the
+  ground before and after a snap maps as two ghost layers.
+- **Specks** (`voxels.min_blob_volume`): groups of voxels on their own smaller
+  than 0.01 m³ are left out of every map.
 
 A ~1.5 GB, 5 minute, 35 m recording takes about 20 s (release build).
 

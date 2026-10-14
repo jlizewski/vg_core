@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
               << (track.duration > 0 ? static_cast<double>(track.poses) / track.duration : 0.0)
               << " Hz), path " << track.path_length << " m, " << track.gaps
               << " gaps (longest " << track.longest_gap << " s)\n  " << track.jumps.size()
-              << " jumps (faster than 2 m/s or 3 rad/s)";
+              << " jumps (faster than 2 m/s or 180 deg/s)";
     std::cout << (track.jumps.empty() ? "\n" : ", largest first:\n");
     for (std::size_t j = 0; j < std::min(max_jumps, track.jumps.size()); ++j) {
       const auto& jump = track.jumps[j];

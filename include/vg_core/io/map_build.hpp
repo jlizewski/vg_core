@@ -9,6 +9,7 @@
 #include <ostream>
 
 #include "vg_core/map_builder.hpp"
+#include "vg_core/pose_jumps.hpp"
 
 namespace vg::io {
 
@@ -22,6 +23,7 @@ struct BuildOptions {
   // Undo the tracker's pose jumps (see pose_jumps.hpp) before mapping, so
   // the parts of the walk on either side of one don't map as ghost copies.
   bool remove_pose_jumps = true;
+  PoseJumpConfig pose_jumps;
   // Fused weight a voxel needs to be mapped (TsdfConfig::min_weight). If
   // unset, it's chosen to suit the depth: confidence lowers the weight of
   // most readings, so depth with confidence (e.g. ARCore raw depth) gets
@@ -41,7 +43,14 @@ struct BuildOptions {
 // map is placed on the Earth from the session's GPS fixes and poses, when it
 // has GPS. Progress and timings go to log. Throws std::runtime_error if the
 // session can't be read or the package can't be written.
-void build_map_package(const std::filesystem::path& session, const std::filesystem::path& dir,
-                       const BuildOptions& options, std::ostream& log);
+// What the build settled on where options left it to the data.
+struct BuildSummary {
+  float min_weight = 0.0f;
+  bool depth_has_confidence = false;
+};
+
+BuildSummary build_map_package(const std::filesystem::path& session,
+                               const std::filesystem::path& dir, const BuildOptions& options,
+                               std::ostream& log);
 
 }  // namespace vg::io

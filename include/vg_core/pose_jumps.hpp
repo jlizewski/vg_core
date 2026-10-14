@@ -16,11 +16,11 @@ namespace vg {
 
 struct PoseJumpConfig {
   // Motion between consecutive poses faster than a hand-held phone moves.
-  double max_speed = 2.0;          // m/s
-  double max_angular_speed = 3.0;  // rad/s
+  double max_speed = 2.0;                             // m/s
+  double max_angular_speed = 3.14159265358979323846;  // rad/s (180 deg/s)
   // Jumps smaller than these are ignored, however short the interval.
-  double min_translation = 0.03;  // m
-  double min_rotation = 0.05;     // rad
+  double min_translation = 0.03;                              // m
+  double min_rotation = 3.0 * 3.14159265358979323846 / 180.0;  // rad (3 deg)
   // Consecutive poses further apart than this are a gap, not a jump.
   Timestamp max_gap = 500'000'000;
 };

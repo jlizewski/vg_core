@@ -46,3 +46,12 @@ if(VG_CORE_BUILD_IO)
   vg_core_set_warnings(vg_core_io_tests)
   gtest_discover_tests(vg_core_io_tests)
 endif()
+
+if(TARGET vg_core_config)
+  add_executable(vg_core_config_tests config_test.cpp)
+  target_link_libraries(vg_core_config_tests PRIVATE vg_core::vg_core_config GTest::gtest_main)
+  target_compile_definitions(vg_core_config_tests PRIVATE
+    VG_CORE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+  vg_core_set_warnings(vg_core_config_tests)
+  gtest_discover_tests(vg_core_config_tests)
+endif()
