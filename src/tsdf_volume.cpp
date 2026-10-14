@@ -7,6 +7,8 @@
 #include <thread>
 #include <utility>
 
+#include "vg_core/depth_filter.hpp"
+
 namespace vg {
 namespace {
 
@@ -60,7 +62,19 @@ const TsdfVolume::Voxel* TsdfVolume::find_voxel(const Eigen::Vector3i& voxel) co
   return &it->second[linear_index(voxel - block * kBlockSize)];
 }
 
-void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& world_from_camera) {
+void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world_from_camera) {
+  // Readings the filters reject are removed up front, so they neither place
+  // blocks nor update the voxels that project onto them.
+  std::optional<DepthFrame> filtered;
+  if (config_.edge_ratio > 0.0 || config_.max_incidence_deg < 90.0) {
+    DepthFilterConfig filter;
+    filter.min_depth = config_.min_depth;
+    filter.max_depth = config_.max_depth;
+    filter.edge_ratio = config_.edge_ratio;
+    filter.max_incidence_deg = config_.max_incidence_deg;
+    filtered = filter_depth(raw, filter);
+  }
+  const DepthFrame& frame = filtered ? *filtered : raw;
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
   const double block_edge = config_.voxel_size * kBlockSize;
@@ -88,6 +102,34 @@ void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& wor
     }
   }
 
+  // Carving: existing blocks between the camera and the truncation band of
+  // each sampled reading. Fusing them marks the voxels the ray sees through
+  // as free space (the projective update gives them +1).
+  if (config_.carve) {
+    const int carve_stride = std::max(1, config_.carve_stride);
+    for (int v = carve_stride / 2; v < k.height; v += carve_stride) {
+      for (int u = carve_stride / 2; u < k.width; u += carve_stride) {
+        const std::size_t i = frame.index(u, v);
+        const float d = frame.depth[i];
+        if (!valid_depth(d, config_) || !confident(frame, i, config_)) {
+          continue;
+        }
+        const Eigen::Vector3d ray((u - k.cx) / k.fx, (v - k.cy) / k.fy, 1.0);
+        // Half a block per step along the ray, in units of depth.
+        const double step = 0.5 * block_edge / ray.norm();
+        Eigen::Vector3i previous(std::numeric_limits<int>::min(), 0, 0);
+        for (double z = config_.min_depth; z < d - trunc; z += step) {
+          const Eigen::Vector3d p = world_from_camera * (ray * z);
+          const Eigen::Vector3i index = (p / block_edge).array().floor().cast<int>();
+          if (index != previous && blocks_.count(index) != 0) {
+            touched.insert(index);
+          }
+          previous = index;
+        }
+      }
+    }
+  }
+
   // Blocks are fused independently, so they can be split across threads.
   // Allocating first keeps the hash map untouched while workers run.
   std::vector<std::pair<Eigen::Vector3i, Block*>> work;
@@ -96,11 +138,36 @@ void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& wor
     work.emplace_back(index, &blocks_[index]);
     changed_.insert(index);
   }
+  // Per-pixel weights, when they aren't all 1.
+  std::vector<float> weights;
+  if (config_.quality_weights) {
+    weights.assign(frame.depth.size(), 0.0f);
+    const double reference = config_.weight_reference_depth;
+    for (int v = 0; v < k.height; ++v) {
+      for (int u = 0; u < k.width; ++u) {
+        const std::size_t i = frame.index(u, v);
+        const float d = frame.depth[i];
+        if (!valid_depth(d, config_)) {
+          continue;
+        }
+        double w = (reference / d) * (reference / d);
+        if (!frame.confidence.empty()) {
+          w *= frame.confidence[i] / 255.0;
+        }
+        const double angle = incidence_deg(frame, u, v);
+        if (!std::isnan(angle)) {
+          w *= std::cos(angle * 3.14159265358979323846 / 180.0);
+        }
+        weights[i] = static_cast<float>(w);
+      }
+    }
+  }
+
   const Eigen::Isometry3d camera_from_world = world_from_camera.inverse();
   std::atomic<std::size_t> next{0};
   const auto fuse = [&]() {
     for (std::size_t w = next++; w < work.size(); w = next++) {
-      integrate_block(work[w].first, *work[w].second, frame, camera_from_world);
+      integrate_block(work[w].first, *work[w].second, frame, weights, camera_from_world);
     }
   };
   const unsigned hardware = std::max(1u, std::thread::hardware_concurrency());
@@ -118,7 +185,7 @@ void TsdfVolume::integrate(const DepthFrame& frame, const Eigen::Isometry3d& wor
 }
 
 void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& block,
-                                 const DepthFrame& frame,
+                                 const DepthFrame& frame, const std::vector<float>& weights,
                                  const Eigen::Isometry3d& camera_from_world) {
   const CameraIntrinsics& k = frame.intrinsics;
   const double trunc = config_.truncation_distance;
@@ -149,10 +216,14 @@ void TsdfVolume::integrate_block(const Eigen::Vector3i& block_index, Block& bloc
         }
         const float tsdf = static_cast<float>(std::min(1.0, sdf / trunc));
 
+        const float sample = weights.empty() ? 1.0f : weights[i];
+        if (sample <= 0.0f) {
+          continue;
+        }
         Voxel& voxel = block[linear_index(local)];
         const float w = voxel.weight;
-        voxel.tsdf = (voxel.tsdf * w + tsdf) / (w + 1.0f);
-        voxel.weight = std::min(w + 1.0f, config_.max_weight);
+        voxel.tsdf = (voxel.tsdf * w + tsdf * sample) / (w + sample);
+        voxel.weight = std::min(w + sample, config_.max_weight);
       }
     }
   }
@@ -249,7 +320,8 @@ void TsdfVolume::append_occupied_voxels(const Eigen::Vector3i& block_index, cons
         const Voxel& v = block[linear_index(local)];
         // Behind a surface, but not saturated: a saturated value next to free
         // space is an occlusion edge, not a surface.
-        if (v.weight <= 0.0f || v.tsdf >= 0.0f || v.tsdf <= -1.0f) {
+        if (v.weight <= 0.0f || v.weight < config_.min_weight || v.tsdf >= 0.0f ||
+            v.tsdf <= -1.0f) {
           continue;
         }
         bool in_front_seen = false;
@@ -280,13 +352,14 @@ void TsdfVolume::append_surface_points(const Eigen::Vector3i& block_index, const
         const Voxel& a = block[linear_index(local)];
         // Saturated values sit at the edge of the truncation band, where a
         // sign flip is an occlusion boundary rather than a surface.
-        if (a.weight <= 0.0f || std::abs(a.tsdf) >= 1.0f) {
+        if (a.weight <= 0.0f || a.weight < config_.min_weight || std::abs(a.tsdf) >= 1.0f) {
           continue;
         }
         for (int axis = 0; axis < 3; ++axis) {
           const Eigen::Vector3i neighbor = origin + local + Eigen::Vector3i::Unit(axis);
           const Voxel* b = find_voxel(neighbor);
-          if (b == nullptr || b->weight <= 0.0f || std::abs(b->tsdf) >= 1.0f ||
+          if (b == nullptr || b->weight <= 0.0f || b->weight < config_.min_weight ||
+              std::abs(b->tsdf) >= 1.0f ||
               (a.tsdf >= 0.0f) == (b->tsdf >= 0.0f)) {
             continue;
           }

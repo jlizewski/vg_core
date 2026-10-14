@@ -111,6 +111,9 @@ class MapBuilder {
   std::size_t height_map_cells() const { return height_map_.size(); }
 
   const TsdfVolume& volume() const { return volume_; }
+
+  // Changes the fused weight voxels need to count (TsdfConfig::min_weight).
+  void set_min_weight(float min_weight) { volume_.set_min_weight(min_weight); }
   const Stats& stats() const { return stats_; }
 
  private:

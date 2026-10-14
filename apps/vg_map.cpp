@@ -2,7 +2,8 @@
 //
 //   vg_map <package_dir> <stage>... [options]
 //
-// Stages: surface, ground, sun, or all (the three, in that order). Each reads
+// Stages: voxels, surface, ground, sun, or all (the four, in that order), and the
+// diagnostic layers (where surfaces are stacked: ghosts). Each reads
 // the package's map.vgm (and sun reads ground.asc), so tweaking how a map is
 // derived doesn't need the recording, e.g.
 //
@@ -16,6 +17,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,8 +28,9 @@ namespace {
 
 int usage() {
   std::cerr << "usage: vg_map <package_dir> <stage>... [options]\n"
-               "stages: surface, ground, sun, all\n"
+               "stages: voxels, surface, ground, sun, all; layers (ghost surface diagnostic)\n"
                "  --cell M               cell size of the 2D maps (default the package's)\n"
+               "  --min-weight W         fused weight a voxel needs to count (default the map's)\n"
             << vg::app::kStageOptionsHelp;
   return 2;
 }
@@ -39,16 +42,17 @@ int main(int argc, char** argv) {
     return usage();
   }
   const std::string package_dir = argv[1];
-  const std::vector<std::string> known = {"surface", "ground", "sun"};
+  const std::vector<std::string> all = {"voxels", "surface", "ground", "sun"};
   std::vector<std::string> requested;
   vg::app::StageOptions stages;
+  std::optional<float> min_weight;
 
   int i = 2;
   for (; i < argc && std::string(argv[i]).rfind("--", 0) != 0; ++i) {
     const std::string stage = argv[i];
     if (stage == "all") {
-      requested.insert(requested.end(), known.begin(), known.end());
-    } else if (std::find(known.begin(), known.end(), stage) != known.end()) {
+      requested.insert(requested.end(), all.begin(), all.end());
+    } else if (stage == "layers" || std::find(all.begin(), all.end(), stage) != all.end()) {
       requested.push_back(stage);
     } else {
       std::cerr << "vg_map: unknown stage " << stage << "\n";
@@ -66,6 +70,8 @@ int main(int argc, char** argv) {
     const char* text = argv[++i];
     if (arg == "--cell") {
       stages.set_cell_size(std::atof(text));
+    } else if (arg == "--min-weight") {
+      min_weight = static_cast<float>(std::atof(text));
     } else if (!stages.parse(arg, text)) {
       return usage();
     }
@@ -76,6 +82,13 @@ int main(int argc, char** argv) {
 
   try {
     vg::MapPackage package(package_dir, std::cout);
+    if (min_weight) {
+      package.set_min_weight(*min_weight);
+    }
+    stages.apply(package);
+    if (wants("voxels")) {
+      package.make_voxels();
+    }
     if (wants("surface")) {
       package.make_surface(stages.surface);
     }
@@ -89,6 +102,9 @@ int main(int argc, char** argv) {
     }
     if (wants("sun") && !package.make_sun(stages.sun)) {
       return 1;
+    }
+    if (wants("layers")) {
+      package.make_layers(stages.surface);
     }
   } catch (const std::exception& e) {
     std::cerr << "vg_map: " << e.what() << "\n";

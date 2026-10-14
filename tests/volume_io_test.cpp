@@ -14,6 +14,9 @@ vg::TsdfVolume fused_ground() {
   config.voxel_size = 0.05;
   config.truncation_distance = 0.15;
   config.max_weight = 32.0f;
+  config.quality_weights = true;
+  config.weight_reference_depth = 1.5;
+  config.min_weight = 2.5f;
   vg::TsdfVolume volume(config);
   const auto pose =
       vg::test::look_at({0.0, 0.0, 1.5}, {0.0, 0.0, 0.0}, Eigen::Vector3d::UnitY());
@@ -52,6 +55,9 @@ TEST(VolumeIo, RoundTripsVolumeAndMetadata) {
   EXPECT_EQ(config.voxel_size, 0.05);
   EXPECT_EQ(config.truncation_distance, 0.15);
   EXPECT_EQ(config.max_weight, 32.0f);
+  EXPECT_TRUE(config.quality_weights);
+  EXPECT_EQ(config.weight_reference_depth, 1.5);
+  EXPECT_EQ(config.min_weight, 2.5f);
   const auto indices = volume.block_indices();
   ASSERT_GT(indices.size(), 0u);
   ASSERT_EQ(saved.volume.block_indices(), indices);

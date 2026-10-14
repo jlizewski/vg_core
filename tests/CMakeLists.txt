@@ -16,17 +16,21 @@ endif()
 include(GoogleTest)
 
 add_executable(vg_core_tests
+  depth_filter_test.cpp
   depth_spool_test.cpp
+  diagnostics_test.cpp
   geo_reference_test.cpp
   ground_segmentation_test.cpp
   height_map_io_test.cpp
   map_builder_test.cpp
   map_package_test.cpp
+  pose_jumps_test.cpp
   solar_test.cpp
   sun_map_test.cpp
   tsdf_volume_test.cpp
   version_test.cpp
   volume_io_test.cpp
+  voxel_cleanup_test.cpp
   voxel_map_io_test.cpp)
 target_link_libraries(vg_core_tests PRIVATE vg_core::vg_core GTest::gtest_main)
 vg_core_set_warnings(vg_core_tests)

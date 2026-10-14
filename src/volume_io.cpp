@@ -10,7 +10,8 @@ namespace vg {
 namespace {
 
 constexpr std::array<char, 8> kMagic = {'V', 'G', 'M', 'A', 'P', '\0', '\0', '\0'};
-constexpr std::uint32_t kVersion = 1;
+// Version 2 added the quality weighting and minimum weight.
+constexpr std::uint32_t kVersion = 2;
 
 // Values are copied as raw bytes: little-endian on all supported hosts.
 template <typename T>
@@ -61,6 +62,9 @@ void write_map(const TsdfVolume& volume, const MapMetadata& metadata, std::ostre
   put(out, config.max_depth);
   put(out, config.min_confidence);
   put(out, config.max_weight);
+  put(out, static_cast<std::uint8_t>(config.quality_weights ? 1 : 0));
+  put(out, config.weight_reference_depth);
+  put(out, config.min_weight);
 
   put_string(out, metadata.session);
   put(out, metadata.cell_size);
@@ -93,7 +97,7 @@ SavedMap read_map(std::istream& in) {
     throw std::runtime_error("not a vg map file");
   }
   const auto version = get<std::uint32_t>(in);
-  if (version != kVersion) {
+  if (version < 1 || version > kVersion) {
     throw std::runtime_error("unsupported map file version " + std::to_string(version));
   }
 
@@ -104,6 +108,11 @@ SavedMap read_map(std::istream& in) {
   config.max_depth = get<double>(in);
   config.min_confidence = get<std::uint8_t>(in);
   config.max_weight = get<float>(in);
+  if (version >= 2) {
+    config.quality_weights = get<std::uint8_t>(in) != 0;
+    config.weight_reference_depth = get<double>(in);
+    config.min_weight = get<float>(in);
+  }
   if (!(config.voxel_size > 0.0)) {
     throw std::runtime_error("map file has an invalid voxel size");
   }

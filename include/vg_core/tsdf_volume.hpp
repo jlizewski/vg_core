@@ -24,12 +24,34 @@ struct TsdfConfig {
   double max_depth = 5.0;
   // Pixels with confidence below this are ignored (when confidence is present).
   std::uint8_t min_confidence = 0;
+  // Pixels on a depth edge (a neighbor differs by more than this fraction of
+  // the depth) are ignored; 0 keeps them. See depth_filter.hpp.
+  double edge_ratio = 0.0;
+  // Surfaces seen more than this far from head-on, in degrees, are ignored;
+  // 90 keeps them all.
+  double max_incidence_deg = 90.0;
+  // Weight each reading by how much to trust it, instead of 1: its
+  // confidence (when present, 255 = 1) x (weight_reference_depth / depth)^2,
+  // as depth error grows with the square of range, x the cosine of the angle
+  // the surface is seen at from head-on.
+  bool quality_weights = false;
+  double weight_reference_depth = 1.0;
   // Cap on the per-voxel weight, so the map can still adapt to change.
   float max_weight = 64.0f;
+  // Voxels with less total weight than this are left out of occupied_voxels()
+  // and the surface points: seen too little, or too poorly, to trust.
+  float min_weight = 0.0f;
   // Only every pixel_stride-th pixel in each direction places new blocks. The
   // blocks it finds are still fused from every pixel, so at coarse voxels a
   // stride of 2 or more loses nothing and saves most of the allocation work.
   int pixel_stride = 1;
+  // Free-space carving: also fuse the existing blocks each depth ray passes
+  // through on its way to the surface, so space a frame sees through is
+  // marked empty. Something mapped from a bad reading (a floating blob, a
+  // ghost) fades out once later frames look through it. Rays are cast from
+  // every carve_stride-th pixel in each direction; carving never allocates.
+  bool carve = false;
+  int carve_stride = 4;
   // Threads that fuse a frame's blocks in parallel; 0 uses all hardware
   // threads. Results are the same for any count.
   int threads = 1;
@@ -53,6 +75,10 @@ class TsdfVolume {
   explicit TsdfVolume(const TsdfConfig& config = {});
 
   const TsdfConfig& config() const { return config_; }
+
+  // Changes the weight voxels need to count (TsdfConfig::min_weight), e.g. to
+  // re-tune a loaded map without rebuilding it.
+  void set_min_weight(float min_weight) { config_.min_weight = min_weight; }
 
   // Fuses one depth frame taken by a camera at world_from_camera.
   void integrate(const DepthFrame& frame, const Eigen::Isometry3d& world_from_camera);
@@ -109,6 +135,7 @@ class TsdfVolume {
   Eigen::Vector3d voxel_center(const Eigen::Vector3i& voxel) const;
   const Voxel* find_voxel(const Eigen::Vector3i& voxel) const;
   void integrate_block(const Eigen::Vector3i& block_index, Block& block, const DepthFrame& frame,
+                       const std::vector<float>& weights,
                        const Eigen::Isometry3d& camera_from_world);
   void append_surface_points(const Eigen::Vector3i& block_index, const Block& block,
                              std::vector<Eigen::Vector3d>& points) const;

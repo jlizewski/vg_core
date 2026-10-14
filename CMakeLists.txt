@@ -23,7 +23,9 @@ include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
 
 add_library(vg_core
+  src/depth_filter.cpp
   src/depth_spool.cpp
+  src/diagnostics.cpp
   src/geo_reference.cpp
   src/ground_segmentation.cpp
   src/height_map.cpp
@@ -31,9 +33,11 @@ add_library(vg_core
   src/live_height_map.cpp
   src/map_builder.cpp
   src/map_package.cpp
+  src/pose_jumps.cpp
   src/solar.cpp
   src/sun_map.cpp
   src/tsdf_volume.cpp
+  src/voxel_cleanup.cpp
   src/voxel_map_io.cpp
   src/volume_io.cpp
   src/version.cpp)

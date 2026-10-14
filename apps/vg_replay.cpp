@@ -14,7 +14,9 @@
 // The sun stage needs to know where the map is: from the session's GPS, or
 // --lat/--lon. Without either it's skipped and the rest is still written.
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -36,12 +38,28 @@ int usage() {
          "  --resolution M         cell size of the 2D maps (default 0.1524 = 6 in)\n"
          "  --voxel M              3D voxel size (default resolution / 2)\n"
          "  --trunc M              TSDF truncation distance (default 3 voxels)\n"
-         "  --max-depth M          ignore depth readings farther than this (default 5)\n"
+         "  --max-depth M          ignore depth readings farther than this (default 3.5)\n"
+         "  --min-confidence C     ignore readings less confident than this, 0-255, when the\n"
+         "                         depth has confidence (default 0)\n"
+         "  --edge-ratio R         ignore depth edges: a jump to a neighbor of more than R x\n"
+         "                         depth (default 0.05; 0 keeps them)\n"
+         "  --max-angle DEG        ignore surfaces seen more than this from head-on (default 75;\n"
+         "                         90 keeps them)\n"
+         "  --weights 0|1          weight readings by confidence, range and angle (default 1)\n"
+         "  --min-weight W         fused weight a voxel needs to be mapped (default 0.05 for\n"
+         "                         depth with confidence, else 0.5)\n"
+         "  --carve 0|1            mark space seen through as empty, erasing floating blobs\n"
+         "                         (default 1)\n"
+         "  --carve-stride N       carve along the rays of every Nth depth pixel (default 4)\n"
          "  --stride N             place blocks from every Nth depth pixel (default 2)\n"
-         "  --keyframe-dist M      fuse a frame only after moving this far (default 0.05)\n"
-         "  --keyframe-angle DEG   ... or turning this much (default 5); both 0 fuse every "
-         "frame\n"
+         "  --keyframe-dist M      fuse a frame only after moving this far (default 0: every\n"
+         "                         frame; fewer frames build faster but average out less noise)\n"
+         "  --keyframe-angle DEG   ... or turning this much (default 0)\n"
          "  --rate R               playback speed: 0 as fast as possible (default), 1 real time\n"
+         "  --fix-jumps 0|1        undo the tracker's pose jumps, which map as ghost copies\n"
+         "                         (default 1)\n"
+         "  --from S --to S        fuse only depth taken in this window, in seconds from the\n"
+         "                         first sensor reading (times as vg mcap stats prints them)\n"
       << vg::app::kStageOptionsHelp;
   return 2;
 }
@@ -56,10 +74,15 @@ int main(int argc, char** argv) {
   const std::string package_dir = argv[2];
 
   vg::io::BuildOptions build;
+  build.builder.tsdf.max_depth = 3.5;
+  build.builder.tsdf.edge_ratio = 0.05;
+  build.builder.tsdf.max_incidence_deg = 75.0;
+  build.builder.tsdf.quality_weights = true;
+  build.builder.tsdf.carve = true;
   build.builder.tsdf.pixel_stride = 2;
   build.builder.tsdf.threads = 0;
-  build.builder.keyframe_translation = 0.05;
-  build.builder.keyframe_rotation = 5.0 * kDegree;
+  build.builder.keyframe_translation = 0.0;
+  build.builder.keyframe_rotation = 0.0;
   build.builder.drop_non_keyframes = true;
   double resolution = 6.0 * kInch;
   std::optional<double> voxel;
@@ -81,12 +104,33 @@ int main(int argc, char** argv) {
       trunc = value;
     } else if (arg == "--max-depth") {
       build.builder.tsdf.max_depth = value;
+    } else if (arg == "--min-confidence") {
+      build.builder.tsdf.min_confidence =
+          static_cast<std::uint8_t>(std::clamp(value, 0.0, 255.0));
+    } else if (arg == "--edge-ratio") {
+      build.builder.tsdf.edge_ratio = value;
+    } else if (arg == "--max-angle") {
+      build.builder.tsdf.max_incidence_deg = value;
+    } else if (arg == "--weights") {
+      build.builder.tsdf.quality_weights = value != 0.0;
+    } else if (arg == "--min-weight") {
+      build.min_weight = static_cast<float>(value);
+    } else if (arg == "--carve") {
+      build.builder.tsdf.carve = value != 0.0;
+    } else if (arg == "--carve-stride") {
+      build.builder.tsdf.carve_stride = static_cast<int>(value);
     } else if (arg == "--stride") {
       build.builder.tsdf.pixel_stride = static_cast<int>(value);
     } else if (arg == "--keyframe-dist") {
       build.builder.keyframe_translation = value;
     } else if (arg == "--keyframe-angle") {
       build.builder.keyframe_rotation = value * kDegree;
+    } else if (arg == "--fix-jumps") {
+      build.remove_pose_jumps = value != 0.0;
+    } else if (arg == "--from") {
+      build.from = value;
+    } else if (arg == "--to") {
+      build.to = value;
     } else if (arg == "--rate") {
       build.rate = value;
     } else if (!stages.parse(arg, text)) {
@@ -106,6 +150,8 @@ int main(int argc, char** argv) {
   try {
     vg::io::build_map_package(session_path, package_dir, build, std::cout);
     vg::MapPackage package(package_dir, std::cout);
+    stages.apply(package);
+    package.make_voxels();
     package.make_surface(stages.surface);
     package.make_ground(stages.ground);
     package.make_sun(stages.sun);

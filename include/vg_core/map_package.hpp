@@ -4,12 +4,14 @@
 // the maps derived from it.
 //
 //   map.vgm         the 3D map (TSDF volume + geo-reference), see volume_io.hpp
-//   voxels.ply      its occupied voxels, for viewing
+//   voxels.ply      its occupied voxels, for viewing        <- voxels stage
 //   surface.asc     top surface height per cell (m)        <- surface stage
 //   ground.asc      bare ground height per cell (m)        <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
 //   sun_hours.asc   hours of direct sun per cell           <- sun stage
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
+//   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
+//   trajectory.csv  the camera's path while mapping (t, x, y, z)  <- build
 //   manifest.json   what each file is, and the settings each stage last ran with
 //
 // The 3D map is the core: it is built once from the recording (see
@@ -39,6 +41,8 @@ inline constexpr const char* kGround = "ground.asc";
 inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
+inline constexpr const char* kLayers = "layers.asc";
+inline constexpr const char* kTrajectory = "trajectory.csv";
 inline constexpr const char* kManifest = "manifest.json";
 }  // namespace package_file
 
@@ -85,8 +89,8 @@ struct SunOptions {
 };
 
 // Starts a package in dir (created if needed) from a freshly built 3D map:
-// clears any earlier package there, writes map.vgm and voxels.ply, and a new
-// manifest recording build_settings.
+// clears any earlier package there, writes map.vgm and a new manifest
+// recording build_settings.
 void create_map_package(const std::filesystem::path& dir, const TsdfVolume& volume,
                         const MapMetadata& metadata, const StageSettings& build_settings,
                         std::ostream& log);
@@ -102,6 +106,20 @@ class MapPackage {
   const TsdfVolume& volume() const { return map_.volume; }
   const MapMetadata& metadata() const { return map_.metadata; }
 
+  // Re-tunes how much fused weight a voxel needs to count as part of the map
+  // (TsdfConfig::min_weight; the map's own value by default) for the stages
+  // run after this. Higher drops more floating noise, and more faint detail.
+  void set_min_weight(float min_weight);
+
+  // Specks: groups of voxels connected to nothing else, smaller than this
+  // many cubic meters, are left out of every stage run after this (0 keeps
+  // them). They're mostly left by noisy depth.
+  void set_min_blob_volume(double volume);
+  static constexpr double kDefaultMinBlobVolume = 0.01;
+
+  // voxels.ply: the occupied voxels, for viewing.
+  void make_voxels();
+
   // surface.asc: the highest surface point per cell.
   void make_surface(const SurfaceOptions& options = {});
 
@@ -113,6 +131,9 @@ class MapPackage {
   // GPS in the session and no latitude/longitude given).
   bool make_sun(const SunOptions& options);
 
+  // layers.asc: a diagnostic of ghost surfaces, see find_surface_layers().
+  void make_layers(const SurfaceOptions& options = {});
+
  private:
   // All occupied voxels, sorted, computed once.
   const std::vector<Eigen::Vector3i>& occupied();
@@ -122,6 +143,9 @@ class MapPackage {
   std::ostream& log_;
   SavedMap map_;
   std::optional<std::vector<Eigen::Vector3i>> occupied_;
+  // Voxels left out as specks, for the stages that work from the TSDF.
+  std::vector<Eigen::Vector3i> specks_;
+  double min_blob_volume_ = kDefaultMinBlobVolume;
 };
 
 // Rewrites dir's manifest.json, recording settings for stage (replacing what

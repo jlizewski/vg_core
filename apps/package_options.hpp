@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 #include "vg_core/map_package.hpp"
@@ -14,6 +15,9 @@
 namespace vg::app {
 
 inline constexpr const char* kStageOptionsHelp =
+    "every stage:\n"
+    "  --min-blob M3          leave out specks: groups of voxels on their own smaller than\n"
+    "                         this (default 0.01 m^3; 0 keeps them)\n"
     "ground stage:\n"
     "  --max-slope R          steepest ground, rise over run (default 1.0 = 45 deg)\n"
     "  --step-tolerance M     extra step allowed between ground columns (default 0.03)\n"
@@ -31,6 +35,14 @@ struct StageOptions {
   SurfaceOptions surface;
   GroundOptions ground;
   SunOptions sun;
+  std::optional<double> min_blob;
+
+  // Applies the options that hold for every stage.
+  void apply(MapPackage& package) const {
+    if (min_blob) {
+      package.set_min_blob_volume(*min_blob);
+    }
+  }
 
   StageOptions() {
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(
@@ -49,7 +61,9 @@ struct StageOptions {
   bool parse(const std::string& arg, const char* text) {
     const double value = std::atof(text);
     GroundConfig& g = ground.config;
-    if (arg == "--max-slope") {
+    if (arg == "--min-blob") {
+      min_blob = value;
+    } else if (arg == "--max-slope") {
       g.max_slope = value;
     } else if (arg == "--step-tolerance") {
       g.step_tolerance = value;
