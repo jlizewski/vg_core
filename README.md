@@ -261,6 +261,20 @@ what single-frame labels get wrong, and stages ask the map by class.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
 
+> **TODO before shipping the app: re-evaluate the segmentation model.**
+> The first model (an off-the-shelf ADE20K model plus a class-mapping table)
+> was chosen to get started, not for a product. Before shipping:
+>
+> - **Licenses:** ADE20K's terms and some popular weights (e.g. NVIDIA's
+>   SegFormer) are for research / non-commercial use only. Ship commercially
+>   usable weights and training data.
+> - **Accuracy on real yards:** measure where it's wrong (mulch vs. soil vs.
+>   low plants, raised beds, decks, furniture). If it matters, fine-tune a
+>   mobile model on our own frames, labeled by hand or automatically by a
+>   large open-vocabulary model run offline.
+> - **On-phone cost:** inference time, label frame rate, and heat and battery
+>   over a full mapping walk.
+
 `.asc` files are ESRI ASCII grids: plain text, a six-line header (size,
 lower-left corner, cell size, no-data value) and then one value per cell, top
 row first. QGIS and GDAL open them directly; `vg heatmap` and `vg preview`
