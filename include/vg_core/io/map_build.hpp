@@ -38,17 +38,17 @@ struct BuildOptions {
   double to = std::numeric_limits<double>::infinity();
 };
 
-// Rebuilds the 3D map from the session and starts a map package in dir with
-// it (map.vgm, voxels.ply, manifest.json), replacing any package there. The
-// map is placed on the Earth from the session's GPS fixes and poses, when it
-// has GPS. Progress and timings go to log. Throws std::runtime_error if the
-// session can't be read or the package can't be written.
 // What the build settled on where options left it to the data.
 struct BuildSummary {
   float min_weight = 0.0f;
   bool depth_has_confidence = false;
 };
 
+// Rebuilds the 3D map from the session and starts a map package in dir with
+// it (map.vgm, trajectory.csv, manifest.json), replacing any package there.
+// The map is placed on the Earth from the session's GPS fixes and poses, when
+// it has GPS. Progress and timings go to log. Throws std::runtime_error if
+// the session can't be read or the package can't be written.
 BuildSummary build_map_package(const std::filesystem::path& session,
                                const std::filesystem::path& dir, const BuildOptions& options,
                                std::ostream& log);

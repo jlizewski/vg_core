@@ -8,6 +8,19 @@
 // The set is small on purpose: what mapping and sun modeling need to tell
 // apart, not everything a model can name. A model's own classes (e.g.
 // ADE20K's 150) are mapped onto these where it runs.
+//
+// TODO(before shipping): RE-EVALUATE THE SEGMENTATION MODEL.
+//   The first model is an off-the-shelf ADE20K one with a class-mapping
+//   table, chosen to get started, not for a product. Before shipping the app:
+//   - Licenses: ADE20K's terms and some weights (e.g. NVIDIA's SegFormer)
+//     are research / non-commercial only. Use commercially usable weights and
+//     training data.
+//   - Accuracy on real yards: measure where it's wrong (mulch vs soil vs low
+//     plants, raised beds, decks, furniture), and fine-tune on our own
+//     labeled or pseudo-labeled frames if it matters.
+//   - On-phone cost: inference time, label frame rate, heat and battery over
+//     a full mapping walk.
+//   See README.md, "Semantic labels".
 
 #include <array>
 #include <cstddef>
