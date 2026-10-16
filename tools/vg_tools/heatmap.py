@@ -11,6 +11,8 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from vg_tools import semantics
+
 # Inferno-like color stops: dark (least) to pale yellow (most).
 STOPS = (
     (0.0, (0, 0, 4)),
@@ -108,6 +110,19 @@ def render(
     return encode_png(grid.ncols * scale, grid.nrows * scale, rows), lo, hi
 
 
+def render_classes(grid: Grid, scale: int = 1) -> bytes:
+    """PNG bytes of a grid of semantic class ids (semantic.asc), each class in
+    its own color (vg_tools.semantics)."""
+    rows = []
+    for row in grid.rows:
+        line = bytearray()
+        for v in row:
+            px = b"\x00\x00\x00\x00" if v is None else bytes((*semantics.color(int(v)), 255))
+            line += px * scale
+        rows.extend([bytes(line)] * scale)
+    return encode_png(grid.ncols * scale, grid.nrows * scale, rows)
+
+
 def write_heatmap(
     src: Path,
     dst: Path,
@@ -128,7 +143,10 @@ def write_previews(directory: Path, scale: int = 4) -> list[Path]:
         if grid.ncols == 0 or grid.nrows == 0:
             continue  # An empty map, e.g. from a session without depth.
         png = path.with_suffix(".png")
-        data, _, _ = render(grid, scale)
+        if path.name == "semantic.asc":
+            data = render_classes(grid, scale)
+        else:
+            data, _, _ = render(grid, scale)
         png.write_bytes(data)
         written.append(png)
     return written

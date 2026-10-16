@@ -11,6 +11,8 @@ Run from anywhere inside the repository, e.g.:
     vg replay rec.mcap garden/   # build a map package (C++ app from apps/, see vg_tools/apps.py)
     vg map garden/ ground sun    # re-run map package stages from its saved 3D map
     vg mcap repair rec.mcap      # index a recording that was never closed
+    vg labels perf rec.labels.csv          # the phone's segmentation speed and heat
+    vg labels frames rec.mcap frames/      # labels and depth over the camera image
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from vg_tools import apps
 CPP_DIRS = ("apps", "include", "src", "tests")
 CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 # Commands implemented here; a C++ app can't take one of these names.
-BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap", "preview")
+BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap", "preview", "labels")
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -128,6 +130,30 @@ def cmd_preview(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_labels_perf(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import labels
+
+    try:
+        print(labels.format_perf(labels.summarize_perf(args.csv)))
+    except (OSError, ValueError, KeyError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_labels_frames(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import labels
+
+    try:
+        written = labels.write_frames(args.recording, args.out, args.at, args.count, args.fov)
+    except (OSError, ValueError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    for png in written:
+        print(png)
+    return 0
+
+
 def add_app_parsers(sub: argparse._SubParsersAction, app_list: Sequence[apps.App]) -> None:
     """List the C++ apps in --help. main() runs them before argparse sees their
     arguments, so these parsers are only for help (and `vg mcap` alone)."""
@@ -190,6 +216,28 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
     p.add_argument("directory", type=Path, help="directory holding .asc grids")
     p.add_argument("--scale", type=int, default=4, help="pixels per cell (default: 4)")
     p.set_defaults(func=cmd_preview)
+
+    labels = sub.add_parser("labels", help="check a recording's semantic labels")
+    labels_sub = labels.add_subparsers(dest="labels_command", required=True)
+    p = labels_sub.add_parser(
+        "perf", help="summarize the phone's segmentation speed and heat (recording.labels.csv)"
+    )
+    p.add_argument("csv", type=Path, help="the labels CSV the app writes beside a recording")
+    p.set_defaults(func=cmd_labels_perf)
+    p = labels_sub.add_parser(
+        "frames",
+        help="draw labels and depth over the camera image, to check they line up "
+        '(needs pip install -e "tools[analysis]")',
+    )
+    p.add_argument("recording", type=Path, help="recording with labels (.mcap)")
+    p.add_argument("out", type=Path, help="directory for the PNGs")
+    p.add_argument("--at", type=float, nargs="+", metavar="S",
+                   help="seconds from the first depth frame (default: spread over the walk)")
+    p.add_argument("--count", type=int, default=8, help="frames when --at isn't given (default 8)")
+    p.add_argument("--fov", choices=("stretch", "crop"), default="stretch",
+                   help="how depth covers the image: all of it, as recorded (default), or a "
+                   "centered crop of its aspect ratio")
+    p.set_defaults(func=cmd_labels_frames)
 
     add_app_parsers(sub, apps.discover(root or repo_root()))
     return parser

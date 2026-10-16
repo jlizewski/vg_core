@@ -13,6 +13,8 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
 schemas = ["grpcio-tools>=1.60"]
+# Reading recordings (vg labels, ...): MCAP with zstd chunks, images and arrays.
+analysis = ["mcap>=1.2", "mcap-protobuf-support>=0.5", "numpy>=1.26", "pillow>=10"]
 
 [project.scripts]
 vg = "vg_tools.cli:main"

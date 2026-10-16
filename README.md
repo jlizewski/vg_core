@@ -261,6 +261,20 @@ what single-frame labels get wrong, and stages ask the map by class.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
 
+To check a labeled recording:
+
+```sh
+vg mcap stats rec.vgcap.mcap        # share of each class, and how many frames have labels
+vg labels perf rec.labels.csv       # the phone's inference time, latency, heat (CSV from the app)
+vg labels frames rec.vgcap.mcap out/ --at 20 60 120   # PNGs: image | labels over it | depth over it
+```
+
+`vg labels frames` is the alignment check: the labels and depth are drawn over
+the camera image they came from, so their edges should land on the image's
+(trunks, fences, table tops). The depth covers the whole camera image, stretched
+to its aspect ratio (`--fov stretch`, as the recorded depth intrinsics say);
+`--fov crop` draws the other possibility, a centered crop, for comparison.
+
 > **TODO before shipping the app: re-evaluate the segmentation model.**
 > The first model (an off-the-shelf ADE20K model plus a class-mapping table)
 > was chosen to get started, not for a product. Before shipping:
@@ -353,7 +367,10 @@ pytest tools        # test the tools themselves
 vg schemas          # regenerate src/io/schema_descriptors.cpp after editing schemas/
                     # (needs: pip install -e "tools[schemas]")
 vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a heatmap PNG
-vg preview dir/     # render every .asc in a directory as a PNG
+vg preview dir/     # render every .asc in a directory as a PNG (semantic.asc by class)
+vg labels perf rec.labels.csv    # the phone's segmentation speed and heat
+vg labels frames rec.mcap out/   # labels and depth over the camera image, per frame
+                    # (needs: pip install -e "tools[analysis]")
 vg replay ...       # run a C++ app from apps/ (here vg_replay), building it first
 vg map ...          # vg_map
 vg mcap repair ...  # vg_mcap_repair
