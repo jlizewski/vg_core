@@ -152,6 +152,15 @@ const std::array<SemanticClass, 151>& ade20k_classes() {
   return table;
 }
 
+int upright_rotation(const Eigen::Isometry3d& world_from_camera) {
+  // The world's up, in the camera frame.
+  const Eigen::Vector3d up = world_from_camera.linear().transpose() * Eigen::Vector3d::UnitZ();
+  if (std::abs(up.y()) >= std::abs(up.x())) {
+    return up.y() < 0.0 ? 0 : 180;  // Up toward the image's top: already upright.
+  }
+  return up.x() < 0.0 ? 90 : 270;  // Up toward its left edge: turn clockwise.
+}
+
 SegmentationModelInfo deeplabv3_mnv2_ade20k() {
   SegmentationModelInfo m;
   m.name = "deeplabv3_mnv2_ade20k";

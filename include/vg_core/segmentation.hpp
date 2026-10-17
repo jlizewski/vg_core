@@ -20,6 +20,7 @@
 // See the ship-time TODO in semantics.hpp: the models here were chosen to get
 // started.
 
+#include <Eigen/Geometry>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -93,6 +94,11 @@ class InferenceBackend {
   // Where it runs, e.g. "LiteRT GPU" or "ONNX Runtime CPU".
   virtual std::string name() const = 0;
 };
+
+// How far to turn a camera image clockwise (0, 90, 180 or 270 degrees) to make
+// it upright, from the camera's pose: the image edge the world's up (+z)
+// points toward goes to the top. Camera frames are OpenCV's (x right, y down).
+int upright_rotation(const Eigen::Isometry3d& world_from_camera);
 
 class Segmenter {
  public:

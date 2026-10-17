@@ -99,6 +99,10 @@ build:
     # animals move, and depth on the sky is noise. Classes: unknown, ground,
     # plant, tree, structure, sky, dynamic.
     drop_classes: [dynamic, sky]
+    # Score how well each frame's labels agree with the map's votes where they
+    # land (a label quality measure needing no ground truth; in the log and
+    # manifest).
+    consistency: true
 
 # Reading the 3D map out for every derived map. vg map can re-tune these without
 # a rebuild.

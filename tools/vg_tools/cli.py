@@ -13,6 +13,9 @@ Run from anywhere inside the repository, e.g.:
     vg mcap repair rec.mcap      # index a recording that was never closed
     vg labels perf rec.labels.csv          # the phone's segmentation speed and heat
     vg labels frames rec.mcap frames/      # labels and depth over the camera image
+    vg labels compare a.mcap b.mcap        # how two labelings of a recording differ
+    vg models export NAME model.tflite     # a segmentation model as ONNX, for vg segment
+    vg segment rec.mcap out.mcap           # relabel a recording on this computer
 """
 
 from __future__ import annotations
@@ -29,7 +32,9 @@ from vg_tools import apps
 CPP_DIRS = ("apps", "include", "src", "tests")
 CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 # Commands implemented here; a C++ app can't take one of these names.
-BUILTINS = ("configure", "build", "test", "format", "schemas", "heatmap", "preview", "labels")
+BUILTINS = (
+    "configure", "build", "test", "format", "schemas", "heatmap", "preview", "labels", "models",
+)
 
 
 def repo_root(start: Path | None = None) -> Path:
@@ -141,6 +146,39 @@ def cmd_labels_perf(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_labels_compare(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import labels
+
+    try:
+        comparison = labels.compare_labels(labels.read_labels(args.a), labels.read_labels(args.b))
+    except (OSError, ValueError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    if comparison.frames == 0:
+        print("vg: no depth images labeled in both recordings", file=sys.stderr)
+        return 1
+    print(labels.format_comparison(comparison, str(args.a), str(args.b)))
+    return 0
+
+
+def cmd_models_export(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import models
+
+    out = args.out or root / "models" / f"{args.name}.onnx"
+    try:
+        fixed, agreement = models.export_tflite(args.tflite, out)
+    except (OSError, ValueError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    if fixed:
+        print(f"fixed {len(fixed)} fractional resizes: {', '.join(fixed)}")
+    print(f"{out}: picks the .tflite's class on {100 * agreement:.2f}% of output cells")
+    if agreement < 0.99:
+        print("vg: the ONNX model disagrees with the .tflite; don't use it", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_labels_frames(args: argparse.Namespace, root: Path) -> int:
     from vg_tools import labels
 
@@ -238,6 +276,26 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
                    help="how depth covers the image: all of it, as recorded (default), or a "
                    "centered crop of its aspect ratio")
     p.set_defaults(func=cmd_labels_frames)
+    p = labels_sub.add_parser(
+        "compare",
+        help="how two labelings of the same recording differ: agreement, per-class IoU, "
+        'confusion (needs pip install -e "tools[analysis]")',
+    )
+    p.add_argument("a", type=Path, help="recording with labels (.mcap)")
+    p.add_argument("b", type=Path, help="the same recording labeled another way")
+    p.set_defaults(func=cmd_labels_compare)
+
+    models_parser = sub.add_parser("models", help="segmentation models for the desktop")
+    models_sub = models_parser.add_subparsers(dest="models_command", required=True)
+    p = models_sub.add_parser(
+        "export",
+        help='convert a .tflite segmentation model to ONNX for vg segment, and check it '
+        '(needs pip install -e "tools[models]")',
+    )
+    p.add_argument("name", help="model name, e.g. deeplabv3_mnv2_ade20k")
+    p.add_argument("tflite", type=Path, help="the .tflite model")
+    p.add_argument("--out", type=Path, help="output (default: models/NAME.onnx in vg_core)")
+    p.set_defaults(func=cmd_models_export)
 
     add_app_parsers(sub, apps.discover(root or repo_root()))
     return parser

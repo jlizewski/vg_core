@@ -23,6 +23,7 @@ add_executable(vg_core_tests
   ground_segmentation_test.cpp
   height_map_io_test.cpp
   map_builder_test.cpp
+  label_consistency_test.cpp
   map_package_test.cpp
   pose_jumps_test.cpp
   segmentation_test.cpp
@@ -55,4 +56,14 @@ if(TARGET vg_core_config)
     VG_CORE_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
   vg_core_set_warnings(vg_core_config_tests)
   gtest_discover_tests(vg_core_config_tests)
+endif()
+
+if(TARGET vg_core_onnx)
+  add_executable(vg_core_onnx_tests onnx_backend_test.cpp)
+  target_link_libraries(vg_core_onnx_tests PRIVATE vg_core::vg_core_onnx GTest::gtest_main)
+  target_compile_definitions(vg_core_onnx_tests PRIVATE
+    VG_CORE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
+  vg_core_set_warnings(vg_core_onnx_tests)
+  vg_core_copy_onnxruntime(vg_core_onnx_tests)
+  gtest_discover_tests(vg_core_onnx_tests DISCOVERY_MODE PRE_TEST)
 endif()

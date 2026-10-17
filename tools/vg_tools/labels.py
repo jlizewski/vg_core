@@ -3,6 +3,7 @@ line up with the camera image and depth.
 
     vg labels perf recording.labels.csv     speed, latency and heat while labeling
     vg labels frames recording.mcap out/    image | labels | depth panels per frame
+    vg labels compare a.mcap b.mcap         how two labelings of a recording differ
 
 `perf` reads the CSV the app writes beside each recording and needs nothing
 extra; `frames` reads the MCAP and needs the analysis extra
@@ -230,3 +231,76 @@ def write_frames(path: Path, out_dir: Path, times_s: Sequence[float] | None = No
         render_panel(frame.image, frame.labels, frame.depth, fov).save(png)
         written.append(png)
     return written
+
+
+# ---------------------------------------------------------------------------
+# compare: two labelings of the same recording
+
+
+@dataclass
+class Comparison:
+    frames: int  # Depth images labeled in both.
+    pixels: int  # Depth pixels compared.
+    agree: int
+    # confusion[a][b]: pixels labeled class a in A and class b in B.
+    confusion: list[list[int]]
+
+    def agreement(self) -> float:
+        return self.agree / self.pixels if self.pixels else 0.0
+
+    def class_iou(self, c: int) -> float | None:
+        """Intersection over union of class c between A and B (None if neither has it)."""
+        both = self.confusion[c][c]
+        a = sum(self.confusion[c])
+        b = sum(row[c] for row in self.confusion)
+        union = a + b - both
+        return both / union if union else None
+
+
+def read_labels(path: Path) -> dict[int, object]:
+    """Each labeled depth image's labels (numpy uint8), by timestamp."""
+    from vg_tools import recording
+
+    return {m.time: recording.raw_image_array(m.proto)
+            for m in recording.messages(path, ["/cam/rgb/depth/labels"])}
+
+
+def compare_labels(a: dict[int, object], b: dict[int, object]) -> Comparison:
+    np = __import__("numpy")
+    n = len(CLASSES)
+    confusion = np.zeros((n, n), dtype=np.int64)
+    frames = 0
+    for t in sorted(a.keys() & b.keys()):
+        la, lb = a[t], b[t]
+        if la.shape != lb.shape:
+            continue
+        frames += 1
+        pairs = np.minimum(la, n - 1).astype(np.int64) * n + np.minimum(lb, n - 1)
+        confusion += np.bincount(pairs.ravel(), minlength=n * n).reshape(n, n)
+    pixels = int(confusion.sum())
+    return Comparison(frames, pixels, int(np.trace(confusion)), confusion.tolist())
+
+
+def format_comparison(c: Comparison, name_a: str = "A", name_b: str = "B") -> str:
+    names = [name for name, _ in CLASSES]
+    lines = [
+        f"A: {name_a}",
+        f"B: {name_b}",
+        f"{c.frames} depth images labeled in both, {c.pixels} pixels: "
+        f"{100 * c.agreement():.1f}% labeled the same",
+        "",
+        f"  {'class':<10}{'IoU':>7}{'A %':>9}{'B %':>9}",
+    ]
+    for i, name in enumerate(names):
+        iou = c.class_iou(i)
+        share_a = 100 * sum(c.confusion[i]) / c.pixels if c.pixels else 0.0
+        share_b = 100 * sum(row[i] for row in c.confusion) / c.pixels if c.pixels else 0.0
+        lines.append(f"  {name:<10}{'-' if iou is None else f'{iou:.2f}':>7}"
+                     f"{share_a:>9.1f}{share_b:>9.1f}")
+    lines += ["", "  % of pixels, rows A, columns B:",
+              "  " + " " * 10 + "".join(f"{name[:7]:>8}" for name in names)]
+    for i, name in enumerate(names):
+        cells = "".join(f"{100 * v / c.pixels:>8.2f}" if c.pixels else f"{0:>8}"
+                        for v in c.confusion[i])
+        lines.append(f"  {name:<10}{cells}")
+    return "\n".join(lines)

@@ -207,6 +207,9 @@ ParamSet bind(MappingConfig& c) {
         "Readings labeled with these classes are left out of the map: people and animals "
         "move, and depth on the sky is noise. Classes: unknown, ground, plant, tree, "
         "structure, sky, dynamic.");
+  p.add("build.semantics.consistency", c.build.label_consistency,
+        "Score how well each frame's labels agree with the map's votes where they land (a "
+        "label quality measure needing no ground truth; in the log and manifest).");
 
   p.section("voxels",
             "Reading the 3D map out for every derived map. vg map can re-tune these without a "

@@ -289,6 +289,42 @@ the camera image they came from, so their edges should land on the image's
 to its aspect ratio (`--fov stretch`, as the recorded depth intrinsics say);
 `--fov crop` draws the other possibility, a centered crop, for comparison.
 
+### Segmentation everywhere, and on this computer
+
+Segmentation itself is in vg_core, so the phone, a future iOS app, a ROS2 node
+and the desktop all label alike: `vg::Segmenter`
+([segmentation.hpp](include/vg_core/segmentation.hpp)) turns a camera image
+upright from the camera's pose, runs a model, maps its classes to vg's and
+shrinks the result to the depth image. Only running the model differs per
+platform, behind `vg::InferenceBackend`: on the desktop it's ONNX Runtime
+(`vg_core_onnx`, [onnx_backend.hpp](include/vg_core/onnx_backend.hpp); the
+`VG_CORE_BUILD_ONNX` CMake option, on by default in a desktop checkout, fetches a
+pinned release).
+
+That lets a recording be relabeled on this computer, e.g. with another model or
+class mapping, and the results compared without walking the yard again:
+
+```sh
+vg models export deeplabv3_mnv2_ade20k deeplabv3_mnv2_ade20k.tflite   # once: models/*.onnx
+vg segment rec.mcap rec.desktop.mcap        # the same recording, relabeled here
+vg labels compare rec.mcap rec.desktop.mcap # agreement, per-class IoU, confusion
+vg replay rec.desktop.mcap pkg/             # and what the labels do to the maps
+```
+
+`vg models export` checks that the ONNX model picks the `.tflite`'s class on
+random input (100% for DeepLabV3), so desktop labels stand in for the phone's.
+On the Oct 16 recording the desktop's and the phone's labels agree on 81% of
+pixels per frame (JPEG versus the raw camera image, the phone GPU's lower
+precision), but their maps agree: DeepLabV3's labels flip on about a fifth of
+pixels at the slightest change, which the per-voxel votes smooth out.
+
+So per-pixel agreement has a noise floor around 80% even for the same model,
+and the better measure of a model is **label consistency**: with labels, `vg
+replay` logs (and the manifest records) the share of each frame's labels that
+agree with the map's class where they land, per class. It needs no ground truth:
+steady labels agree with the map, flipping ones don't. DeepLabV3 on the Oct 16
+walk: 85% overall; ground 95%, structure 88%, tree 52%, plant 44%.
+
 > **TODO before shipping the app: re-evaluate the segmentation model.**
 > The first model (an off-the-shelf ADE20K model plus a class-mapping table)
 > was chosen to get started, not for a product. Before shipping:
@@ -384,7 +420,11 @@ vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a he
 vg preview dir/     # render every .asc in a directory as a PNG (semantic.asc by class)
 vg labels perf rec.labels.csv    # the phone's segmentation speed and heat
 vg labels frames rec.mcap out/   # labels and depth over the camera image, per frame
-                    # (needs: pip install -e "tools[analysis]")
+vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
+                    # (both need: pip install -e "tools[analysis]")
+vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
+                    # (needs: pip install -e "tools[models]", large: TensorFlow)
+vg segment rec.mcap out.mcap     # vg_segment: relabel a recording on this computer
 vg replay ...       # run a C++ app from apps/ (here vg_replay), building it first
 vg map ...          # vg_map
 vg mcap repair ...  # vg_mcap_repair
