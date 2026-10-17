@@ -5,6 +5,7 @@
 #include <cmath>
 #include <deque>
 #include <limits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -61,7 +62,15 @@ int max_step_voxels(const GroundConfig& config, double voxel_size, double dist) 
 // Labels the ground columns of grid (whose bottom voxel index is bottom[i], or
 // kNoVoxel). Returns, per column, whether it is ground.
 std::vector<char> find_ground_columns(const Grid& grid, const std::vector<int>& bottom,
+                                      const std::vector<SemanticClass>& bottom_label,
                                       double voxel_size, const GroundConfig& config) {
+  const bool labeled = !bottom_label.empty();
+  const auto is_ground_label = [&](std::size_t i) {
+    return labeled && bottom_label[i] == SemanticClass::Ground;
+  };
+  const auto is_labeled = [&](std::size_t i) {
+    return labeled && bottom_label[i] != SemanticClass::Unknown;
+  };
   const int step_axis = max_step_voxels(config, voxel_size, 1.0);
   const int step_diag = max_step_voxels(config, voxel_size, std::sqrt(2.0));
 
@@ -105,6 +114,16 @@ std::vector<char> find_ground_columns(const Grid& grid, const std::vector<int>& 
     return regions[a].size() > regions[b].size();
   });
 
+  // Columns labeled ground, and labeled at all, per region.
+  std::vector<std::size_t> ground_labeled(regions.size(), 0);
+  std::vector<std::size_t> any_labeled(regions.size(), 0);
+  for (std::size_t r = 0; r < regions.size(); ++r) {
+    for (const std::size_t i : regions[r]) {
+      ground_labeled[r] += is_ground_label(i) ? 1 : 0;
+      any_labeled[r] += is_labeled(i) ? 1 : 0;
+    }
+  }
+
   std::vector<char> ground(grid.cells(), 0);
   std::vector<char> accepted(regions.size(), 0);
   auto accept = [&](std::size_t r) {
@@ -116,8 +135,15 @@ std::vector<char> find_ground_columns(const Grid& grid, const std::vector<int>& 
   if (order.empty()) {
     return ground;
   }
-  // The largest region is the ground the others are judged against.
-  accept(order.front());
+  // The ground the others are judged against: the region with the most
+  // columns labeled ground, or without labels the largest.
+  std::size_t seed = order.front();
+  for (const std::size_t r : order) {
+    if (ground_labeled[r] > ground_labeled[seed]) {
+      seed = r;
+    }
+  }
+  accept(seed);
 
   const double max_gap_voxels = config.max_gap / voxel_size;
   const double cell_area = voxel_size * voxel_size;
@@ -125,70 +151,97 @@ std::vector<char> find_ground_columns(const Grid& grid, const std::vector<int>& 
   for (bool changed = true; changed;) {
     changed = false;
 
-    // Nearest ground column (approximately) to each cell, within max_gap.
-    std::vector<std::size_t> nearest(grid.cells(), kNoSource);
-    std::deque<std::size_t> queue;
-    for (std::size_t i = 0; i < grid.cells(); ++i) {
-      if (ground[i]) {
-        nearest[i] = i;
-        queue.push_back(i);
-      }
-    }
-    while (!queue.empty()) {
-      const std::size_t i = queue.front();
-      queue.pop_front();
-      const Eigen::Vector2i c = grid.cell(i);
-      const Eigen::Vector2i source = grid.cell(nearest[i]);
-      for (const auto& d : kNeighbors8) {
-        const int nx = c.x() + d[0];
-        const int ny = c.y() + d[1];
-        if (!grid.contains(nx, ny)) {
-          continue;
+    // Nearest ground column (approximately) to each cell, within max_dist
+    // voxels.
+    const auto nearest_ground = [&](double max_dist) {
+      std::vector<std::size_t> nearest(grid.cells(), kNoSource);
+      std::deque<std::size_t> queue;
+      for (std::size_t i = 0; i < grid.cells(); ++i) {
+        if (ground[i]) {
+          nearest[i] = i;
+          queue.push_back(i);
         }
-        const std::size_t n = grid.index(nx, ny);
-        if (nearest[n] != kNoSource ||
-            (Eigen::Vector2i(nx, ny) - source).cast<double>().norm() > max_gap_voxels) {
-          continue;
-        }
-        nearest[n] = nearest[i];
-        queue.push_back(n);
       }
-    }
+      while (!queue.empty()) {
+        const std::size_t i = queue.front();
+        queue.pop_front();
+        const Eigen::Vector2i c = grid.cell(i);
+        const Eigen::Vector2i source = grid.cell(nearest[i]);
+        for (const auto& d : kNeighbors8) {
+          const int nx = c.x() + d[0];
+          const int ny = c.y() + d[1];
+          if (!grid.contains(nx, ny)) {
+            continue;
+          }
+          const std::size_t n = grid.index(nx, ny);
+          if (nearest[n] != kNoSource ||
+              (Eigen::Vector2i(nx, ny) - source).cast<double>().norm() > max_dist) {
+            continue;
+          }
+          nearest[n] = nearest[i];
+          queue.push_back(n);
+        }
+      }
+      return nearest;
+    };
+    const std::vector<std::size_t> nearest = nearest_ground(max_gap_voxels);
+    // At any distance, only needed to judge labeled patches far from the ground.
+    std::vector<std::size_t> nearest_any;
 
     for (const std::size_t r : order) {
       if (accepted[r]) {
         continue;
       }
       // Judge the region by its edge: where it meets or faces the ground, it
-      // must not rise or drop more steeply than ground may.
-      std::size_t near = 0;
-      std::size_t level = 0;
-      for (const std::size_t i : regions[r]) {
-        const Eigen::Vector2i c = grid.cell(i);
-        bool edge = false;
-        for (const auto& d : kNeighbors8) {
-          const int nx = c.x() + d[0];
-          const int ny = c.y() + d[1];
-          if (!grid.contains(nx, ny) || region[grid.index(nx, ny)] != static_cast<int>(r)) {
-            edge = true;
-            break;
+      // must not rise or drop more steeply than ground may. Returns the edge
+      // columns with ground in reach, and how many of them are level with it.
+      const auto judge_edge = [&](const std::vector<std::size_t>& nearest_to, double slope) {
+        std::size_t edge_near = 0;
+        std::size_t edge_level = 0;
+        for (const std::size_t i : regions[r]) {
+          const Eigen::Vector2i c = grid.cell(i);
+          bool edge = false;
+          for (const auto& d : kNeighbors8) {
+            const int nx = c.x() + d[0];
+            const int ny = c.y() + d[1];
+            if (!grid.contains(nx, ny) || region[grid.index(nx, ny)] != static_cast<int>(r)) {
+              edge = true;
+              break;
+            }
+          }
+          if (!edge || nearest_to[i] == kNoSource) {
+            continue;
+          }
+          ++edge_near;
+          const double dist = (grid.cell(nearest_to[i]) - c).cast<double>().norm() * voxel_size;
+          const double rise = std::abs(bottom[i] - bottom[nearest_to[i]]) * voxel_size;
+          if (rise <= slope * dist + config.step_tolerance) {
+            ++edge_level;
           }
         }
-        if (!edge || nearest[i] == kNoSource) {
-          continue;
-        }
-        ++near;
-        const double dist = (grid.cell(nearest[i]) - c).cast<double>().norm() * voxel_size;
-        const double rise = std::abs(bottom[i] - bottom[nearest[i]]) * voxel_size;
-        if (rise <= config.max_slope * dist + config.step_tolerance) {
-          ++level;
-        }
-      }
+        return std::pair{edge_near, edge_level};
+      };
+      const auto [near, level] = judge_edge(nearest, config.max_slope);
       const bool lines_up = near > 0 && 2 * level >= near;
       const bool isolated_and_large =
           near == 0 &&
           static_cast<double>(regions[r].size()) * cell_area >= config.min_isolated_area;
-      if (lines_up || isolated_and_large) {
+      // Too small to tell from shape alone, but labeled ground, and nearly
+      // level with the nearest ground (rescue_max_slope): ground past an
+      // obstacle usually carries on at the same height, while a floor labeled
+      // ground up on a porch or deck doesn't.
+      bool isolated_and_labeled_ground =
+          config.rescue_isolated_ground && near == 0 && any_labeled[r] > 0 &&
+          static_cast<double>(ground_labeled[r]) >=
+              config.min_ground_share * static_cast<double>(any_labeled[r]);
+      if (isolated_and_labeled_ground) {
+        if (nearest_any.empty()) {
+          nearest_any = nearest_ground(std::numeric_limits<double>::infinity());
+        }
+        const auto [far, far_level] = judge_edge(nearest_any, config.rescue_max_slope);
+        isolated_and_labeled_ground = far > 0 && 2 * far_level >= far;
+      }
+      if (lines_up || isolated_and_large || isolated_and_labeled_ground) {
         accept(r);
         changed = true;
       }
@@ -279,7 +332,8 @@ void fill_holes(HeightMap& map, const std::vector<char>& fill, std::vector<std::
 }  // namespace
 
 GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
-                                  const GroundConfig& config) {
+                                  const GroundConfig& config,
+                                  const std::vector<SemanticClass>& labels) {
   GroundSegmentation result;
   result.ground.heights.cell_size = config.cell_size;
   if (voxels.empty()) {
@@ -302,7 +356,31 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
     b = std::min(b, v.z());
   }
 
-  std::vector<char> ground_column = find_ground_columns(columns, bottom, voxel_size, config);
+  // The label of each column's bottom voxel, when the voxels are labeled.
+  const bool labeled = config.use_labels && labels.size() == voxels.size();
+  std::vector<SemanticClass> bottom_label;
+  std::vector<int> candidate_bottom = bottom;
+  if (labeled) {
+    bottom_label.assign(columns.cells(), SemanticClass::Unknown);
+    for (std::size_t i = 0; i < voxels.size(); ++i) {
+      const auto& v = voxels[i];
+      const std::size_t c = columns.index(v.x(), v.y());
+      if (v.z() == bottom[c]) {
+        bottom_label[c] = labels[i];
+      }
+    }
+    // Columns whose bottom is something other than ground are no candidates.
+    for (std::size_t c = 0; c < columns.cells(); ++c) {
+      const auto bit = static_cast<unsigned>(bottom_label[c]);
+      if (bottom[c] != kNoVoxel && bit < 32 && ((config.not_ground_labels >> bit) & 1u) != 0) {
+        candidate_bottom[c] = kNoVoxel;
+        ++result.columns_not_ground_by_label;
+      }
+    }
+  }
+
+  std::vector<char> ground_column =
+      find_ground_columns(columns, candidate_bottom, bottom_label, voxel_size, config);
 
   // Fusion rounds the corner where a wall meets the ground, so just inside a
   // wall (or a bed, or a trunk) a column can bottom out a voxel or two above
@@ -473,6 +551,32 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
   }
   result.ground.filled.assign(cells.cells(), 0);
   fill_holes(map, fill, result.ground.filled);
+
+  // What each segment mostly is, by its voxels' labels.
+  if (labeled) {
+    std::unordered_map<Eigen::Vector3i, SemanticClass, VoxelHash> label_of;
+    label_of.reserve(voxels.size());
+    for (std::size_t i = 0; i < voxels.size(); ++i) {
+      label_of.emplace(voxels[i], labels[i]);
+    }
+    for (auto& segment : result.segments) {
+      std::array<std::size_t, kSemanticClasses> counts{};
+      std::size_t total = 0;
+      for (const auto& v : segment.voxels) {
+        const auto it = label_of.find(v);
+        if (it != label_of.end() && it->second != SemanticClass::Unknown) {
+          ++counts[static_cast<std::size_t>(it->second)];
+          ++total;
+        }
+      }
+      const auto best = static_cast<std::size_t>(
+          std::max_element(counts.begin(), counts.end()) - counts.begin());
+      if (total > 0) {
+        segment.label = static_cast<SemanticClass>(best);
+        segment.label_share = static_cast<double>(counts[best]) / static_cast<double>(total);
+      }
+    }
+  }
 
   // How high each segment sits over the (patched) ground.
   for (auto& segment : result.segments) {

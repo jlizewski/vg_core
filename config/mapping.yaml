@@ -137,6 +137,25 @@ ground:
   # Unseen holes in the ground up to this big are patched, in square meters
   # (holes under objects always are).
   max_hole_area: 1
+  # Semantic labels helping find the ground, when the map has them: geometry
+  # still decides, labels veto and rescue.
+  labels:
+    # Use the labels.
+    enabled: true
+    # A column whose bottom voxel is labeled one of these isn't ground (e.g. a
+    # low plant read as raised ground); the ground there is patched like under
+    # objects.
+    not_ground: [plant, tree, structure, dynamic]
+    # Keep small ground patches with nothing to join when they're labeled
+    # ground. Off by default: it also took in decks and porch floors labeled
+    # ground.
+    rescue: false
+    # With rescue: a patch with nothing to join is still ground, however small,
+    # if at least this share of its labeled columns are labeled ground...
+    min_ground_share: 0.5
+    # ... and it rises no more steeply than this (rise over run) toward the
+    # nearest ground: a floor labeled ground up on a porch isn't ground.
+    rescue_max_slope: 0.25
 
 # Hours of direct sun and clear-sky energy per ground cell over a year.
 sun:

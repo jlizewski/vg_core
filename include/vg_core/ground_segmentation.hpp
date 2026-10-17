@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "vg_core/height_map.hpp"
+#include "vg_core/semantics.hpp"
 #include "vg_core/tsdf_volume.hpp"
 
 namespace vg {
@@ -39,6 +40,27 @@ struct GroundConfig {
   // and no larger than this, in square meters. Holes under segments are
   // always patched, whatever their size.
   double max_hole_area = 1.0;
+
+  // Semantic labels, when the voxels have them (see segment_ground()):
+  // geometry finds the ground, labels help it. A column whose bottom voxel
+  // is labeled one of not_ground_labels (e.g. a low plant read as raised
+  // ground) isn't ground, and is patched like the ground under objects. The
+  // ground the rest is judged against is the region with the most columns
+  // labeled ground rather than simply the largest.
+  //
+  // With rescue_isolated_ground, a patch with nothing to join is also ground,
+  // however small, if at least min_ground_share of its labeled columns are
+  // labeled ground and it rises no more steeply than rescue_max_slope (rise
+  // over run) toward the nearest ground. Off by default: on a real yard it
+  // also took in surfaces a meter up (a deck or porch floor, labeled ground,
+  // can't be told from ground rising behind an obstacle).
+  bool use_labels = true;
+  SemanticMask not_ground_labels = mask_of(SemanticClass::Plant) | mask_of(SemanticClass::Tree) |
+                                   mask_of(SemanticClass::Structure) |
+                                   mask_of(SemanticClass::Dynamic);
+  bool rescue_isolated_ground = false;
+  double min_ground_share = 0.5;
+  double rescue_max_slope = 0.25;
 };
 
 // A connected group of non-ground voxels: something on or over the ground.
@@ -56,6 +78,10 @@ struct MapSegment {
   // beneath them, in meters (NaN where there is no ground map below).
   double bottom_above_ground = 0.0;
   double top_above_ground = 0.0;
+  // The class most of its labeled voxels have (Unknown if none are), and the
+  // share of its labeled voxels that have it.
+  SemanticClass label = SemanticClass::Unknown;
+  double label_share = 0.0;
 };
 
 struct GroundMap {
@@ -74,6 +100,8 @@ struct GroundMap {
 
 struct GroundSegmentation {
   std::vector<Eigen::Vector3i> ground_voxels;
+  // Columns left out of the ground because of their label.
+  std::size_t columns_not_ground_by_label = 0;
   // Largest first.
   std::vector<MapSegment> segments;
   GroundMap ground;
@@ -87,8 +115,13 @@ struct GroundSegmentation {
 // beds and other surfaces with no visible ground below stay out because their
 // edges drop steeply to the ground. Cost is linear in the number of voxels
 // plus the xy area they cover; it reprocesses the whole map on each call.
+//
+// labels, if not empty, is each voxel's semantic class (as from
+// TsdfVolume::label_of(), Unknown where it has none), in the same order as
+// voxels; see GroundConfig::use_labels.
 GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
-                                  const GroundConfig& config = {});
+                                  const GroundConfig& config = {},
+                                  const std::vector<SemanticClass>& labels = {});
 
 // Segments the occupied voxels of a volume.
 GroundSegmentation segment_ground(const TsdfVolume& volume, const GroundConfig& config = {});

@@ -7,6 +7,7 @@
 #include <tuple>
 
 #include "test_scene.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace {
 
@@ -259,6 +260,98 @@ TEST(GroundSegmentation, SeparatesRaisedBedAtCoarseVoxels) {
     }
   }
   EXPECT_NEAR(ground_at(result.ground, -0.4, 0.0), 0.0, 0.01);
+}
+
+// Labels for voxels: label(v) for each.
+template <typename Label>
+std::vector<vg::SemanticClass> label_voxels(const Voxels& voxels, Label label) {
+  std::vector<vg::SemanticClass> labels;
+  for (const auto& v : voxels) {
+    labels.push_back(label(v));
+  }
+  return labels;
+}
+
+TEST(GroundSegmentation, LabelsKeepLowPlantsOutOfTheGround) {
+  // Ground cover one voxel (2 cm) high over a 0.4 m patch: within the step
+  // tolerance, so by shape alone it's raised ground.
+  Voxels voxels;
+  const auto in_patch = [](int x, int y) { return x >= 40 && x < 60 && y >= 40 && y < 60; };
+  add_ground(voxels, 0, 100, 0, 100, -1, in_patch);
+  add_ground(voxels, 0, 100, 0, 100, 0, [&](int x, int y) { return !in_patch(x, y); });
+  const auto labels = label_voxels(voxels, [](const Eigen::Vector3i& v) {
+    return v.z() == 0 ? vg::SemanticClass::Plant : vg::SemanticClass::Ground;
+  });
+
+  const auto shape_only = vg::segment_ground(voxels, kVoxel);
+  EXPECT_NEAR(ground_at(shape_only.ground, 1.0, 1.0), 0.02, 1e-4);
+
+  const auto labeled = vg::segment_ground(voxels, kVoxel, {}, labels);
+  EXPECT_EQ(labeled.columns_not_ground_by_label, 400u);
+  EXPECT_TRUE(filled_at(labeled.ground, 1.0, 1.0));
+  EXPECT_NEAR(ground_at(labeled.ground, 1.0, 1.0), 0.0, 1e-3);
+  ASSERT_FALSE(labeled.segments.empty());
+  EXPECT_EQ(labeled.segments[0].label, vg::SemanticClass::Plant);
+  EXPECT_DOUBLE_EQ(labeled.segments[0].label_share, 1.0);
+
+  vg::GroundConfig off;
+  off.use_labels = false;
+  EXPECT_NEAR(ground_at(vg::segment_ground(voxels, kVoxel, off, labels).ground, 1.0, 1.0), 0.02,
+              1e-4);
+}
+
+TEST(GroundSegmentation, LabeledGroundBeatsALargerFlatDeck) {
+  // A small lawn and, next to it, a deck 0.4 m up that's bigger: by size the
+  // deck would be the ground everything is judged against.
+  Voxels voxels;
+  add_ground(voxels, 0, 30, 0, 30, -1);
+  add_ground(voxels, 40, 140, 0, 100, 19);
+  const auto labels = label_voxels(voxels, [](const Eigen::Vector3i& v) {
+    return v.z() < 0 ? vg::SemanticClass::Ground : vg::SemanticClass::Unknown;
+  });
+
+  const auto shape_only = vg::segment_ground(voxels, kVoxel);
+  for (const auto& v : shape_only.ground_voxels) {
+    ASSERT_EQ(v.z(), 19);
+  }
+  const auto labeled = vg::segment_ground(voxels, kVoxel, {}, labels);
+  ASSERT_FALSE(labeled.ground_voxels.empty());
+  for (const auto& v : labeled.ground_voxels) {
+    ASSERT_EQ(v.z(), -1) << v.transpose();
+  }
+}
+
+TEST(GroundSegmentation, LabelsRescueSmallIsolatedGround) {
+  // The main ground, and a 0.2 m patch of ground seen on its own far away
+  // (too small to count by shape: min_isolated_area is 0.5 m^2).
+  Voxels voxels;
+  add_ground(voxels, 0, 60, 0, 60, -1);
+  add_ground(voxels, 150, 160, 150, 160, 5);
+  const auto labels = label_voxels(voxels, [](const Eigen::Vector3i&) {
+    return vg::SemanticClass::Ground;
+  });
+  const auto count_far = [](const vg::GroundSegmentation& result) {
+    std::size_t n = 0;
+    for (const auto& v : result.ground_voxels) {
+      n += v.x() >= 150 ? 1 : 0;
+    }
+    return n;
+  };
+  vg::GroundConfig rescue;
+  rescue.rescue_isolated_ground = true;
+  EXPECT_EQ(count_far(vg::segment_ground(voxels, kVoxel)), 0u);
+  EXPECT_EQ(count_far(vg::segment_ground(voxels, kVoxel, {}, labels)), 0u);  // Off by default.
+  EXPECT_EQ(count_far(vg::segment_ground(voxels, kVoxel, rescue, labels)), 100u);
+
+  // The same patch 1 m up, as a porch floor labeled ground would be: far
+  // above the ground around it, so not ground, label or not.
+  Voxels porch;
+  add_ground(porch, 0, 60, 0, 60, -1);
+  add_ground(porch, 150, 160, 150, 160, 50);
+  const auto porch_labels = label_voxels(porch, [](const Eigen::Vector3i&) {
+    return vg::SemanticClass::Ground;
+  });
+  EXPECT_EQ(count_far(vg::segment_ground(porch, kVoxel, rescue, porch_labels)), 0u);
 }
 
 }  // namespace

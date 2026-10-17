@@ -41,6 +41,7 @@ MappingConfig::MappingConfig() {
   build.builder.drop_non_keyframes = true;
   pipeline = {"voxels", "surface", "ground", "sun", "semantic"};
   drop_classes = {"dynamic", "sky"};
+  not_ground_classes = {"plant", "tree", "structure", "dynamic"};
 }
 
 namespace {
@@ -67,6 +68,7 @@ SemanticMask class_mask(const std::vector<std::string>& names) {
 void MappingConfig::validate() const {
   check_stages(pipeline);
   class_mask(drop_classes);
+  class_mask(not_ground_classes);
 }
 
 io::BuildOptions MappingConfig::build_options() const {
@@ -82,7 +84,11 @@ io::BuildOptions MappingConfig::build_options() const {
 
 SurfaceOptions MappingConfig::surface_options() const { return {cell_size}; }
 
-GroundOptions MappingConfig::ground_options() const { return {ground, cell_size}; }
+GroundOptions MappingConfig::ground_options() const {
+  GroundOptions options{ground, cell_size};
+  options.config.not_ground_labels = class_mask(not_ground_classes);
+  return options;
+}
 
 SunOptions MappingConfig::sun_options() const {
   SunOptions options = sun;
@@ -243,6 +249,23 @@ ParamSet bind(MappingConfig& c) {
         "Unseen holes in the ground up to this big are patched, in square meters (holes under "
         "objects always are).",
         "--max-hole-area");
+
+  p.section("ground.labels",
+            "Semantic labels helping find the ground, when the map has them: geometry still "
+            "decides, labels veto and rescue.");
+  p.add("ground.labels.enabled", c.ground.use_labels, "Use the labels.");
+  p.add("ground.labels.not_ground", c.not_ground_classes,
+        "A column whose bottom voxel is labeled one of these isn't ground (e.g. a low plant "
+        "read as raised ground); the ground there is patched like under objects.");
+  p.add("ground.labels.rescue", c.ground.rescue_isolated_ground,
+        "Keep small ground patches with nothing to join when they're labeled ground. Off by "
+        "default: it also took in decks and porch floors labeled ground.");
+  p.add("ground.labels.min_ground_share", c.ground.min_ground_share,
+        "With rescue: a patch with nothing to join is still ground, however small, if at least "
+        "this share of its labeled columns are labeled ground...");
+  p.add("ground.labels.rescue_max_slope", c.ground.rescue_max_slope,
+        "... and it rises no more steeply than this (rise over run) toward the nearest ground: "
+        "a floor labeled ground up on a porch isn't ground.");
 
   p.section("sun", "Hours of direct sun and clear-sky energy per ground cell over a year.");
   p.add("sun.year", c.year, "Year to simulate. auto: the current one.", "--year");

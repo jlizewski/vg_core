@@ -41,6 +41,7 @@ inline constexpr const char* kMap = "map.vgm";
 inline constexpr const char* kVoxels = "voxels.ply";
 inline constexpr const char* kSurface = "surface.asc";
 inline constexpr const char* kGround = "ground.asc";
+inline constexpr const char* kGroundPatched = "ground_patched.asc";
 inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";

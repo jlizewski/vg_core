@@ -53,6 +53,8 @@ struct MappingConfig {
   // see semantics.hpp); semantics: votes a voxel's class needs to count.
   std::vector<std::string> drop_classes;
   int min_label_votes = 2;
+  // ground.labels.not_ground: classes whose columns aren't ground.
+  std::vector<std::string> not_ground_classes;
 
   // maps, ground, sun, layers.
   std::optional<double> cell_size;

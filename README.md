@@ -151,6 +151,7 @@ garden/
   voxels.ply       its occupied voxels as cubes (MeshLab, Blender, CloudCompare)
   surface.asc      height of the highest surface per cell (m)
   ground.asc       height of the bare ground per cell, holes under objects patched (m)
+  ground_patched.asc  1 where ground.asc was patched rather than seen (diagnostic)
   objects.ply      everything on or over the ground
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
@@ -258,6 +259,19 @@ what single-frame labels get wrong, and stages ask the map by class.
   highest labeled voxel (1 ground ... 6 dynamic), i.e. what's seen from above.
 - `semantics.min_votes` is how many votes a voxel's class needs (fewer leave it
   unknown); `vg mcap stats` shows the share of each class in a recording.
+- The `ground` stage uses the labels alongside its slope rules
+  (`ground.labels`): a column whose bottom voxel is labeled plant, tree,
+  structure or dynamic isn't ground, so low plants and the feet of walls and
+  fences stop reading as raised ground, and the ground there is patched from
+  the lawn around it. The ground everything else is judged against is the
+  region with the most columns labeled ground, not just the largest one (a big
+  deck can't take its place). Each object in `objects.ply` gets the class most
+  of its voxels have (in the manifest). `ground_patched.asc` shows which cells
+  were patched rather than seen.
+- `ground.labels.rescue` (off by default) also keeps small, isolated patches
+  labeled ground. On a real yard it took in surfaces a meter up, since a deck
+  or porch floor labeled ground can't be told from ground rising behind an
+  obstacle.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
 
