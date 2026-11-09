@@ -31,23 +31,31 @@ class Message:
 
 
 def messages(path: Path, topics: Iterable[str] | None = None) -> Iterator[Message]:
-    """Every message of the given topics (all if None), in file order.
+    """Every message of the given topics (all if None), in file order (roughly
+    time order: recorders write sensors in batches).
 
-    Works on recordings that were never closed (no index), as the app leaves
-    them when it's killed, by reading the file front to back.
+    Works on recordings that were never closed (no index, maybe cut off
+    mid-write), as the app leaves them when it's killed, by reading the file
+    front to back up to the cut.
     """
     _require("mcap")
     _require("mcap_protobuf")
+    from mcap.exceptions import EndOfFile
     from mcap.reader import NonSeekingReader
     from mcap_protobuf.decoder import DecoderFactory
 
     wanted = set(topics) if topics is not None else None
     with open(path, "rb") as f:
         reader = NonSeekingReader(f, decoder_factories=[DecoderFactory()])
-        for _schema, channel, message, proto in reader.iter_decoded_messages(
-            topics=list(wanted) if wanted else None
-        ):
-            yield Message(channel.topic, message.log_time, proto)
+        try:
+            # Not log_time_order: that sorts the whole file first, and a cut
+            # off file would yield nothing.
+            for _schema, channel, message, proto in reader.iter_decoded_messages(
+                topics=list(wanted) if wanted else None, log_time_order=False
+            ):
+                yield Message(channel.topic, message.log_time, proto)
+        except EndOfFile:
+            return  # A recording cut off mid-write: everything before the cut.
 
 
 def raw_image_array(proto):
