@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <deque>
 #include <map>
+#include <optional>
 #include <mcap/reader.hpp>
 #include <stdexcept>
 #include <string>
@@ -66,6 +67,10 @@ struct SessionReader::Impl {
   mcap::Timestamp newest = 0;
   std::map<std::string, CameraIntrinsics> camera_calibrations;
   std::map<std::string, CameraIntrinsics> depth_calibrations;
+  // Each camera's first depth calibration, read up front (indexed files):
+  // for depth images stamped before it. A recorder may write its first few
+  // depth images late, stamped earlier than the calibration it wrote first.
+  std::map<std::string, CameraIntrinsics> first_depth_calibrations;
 
   // Next decoded message in time order, or nullopt at the end.
   std::optional<Decoded> next_raw() {
@@ -156,7 +161,10 @@ struct SessionReader::Impl {
       DepthImage depth;
       depth.camera = camera;
       depth.frame.timestamp = raw.timestamp;
-      depth.frame.intrinsics = depth_intrinsics(camera, raw);
+      // Its calibration may come just after it: written with the same time,
+      // so in time order either can be first. Found in next() then.
+      depth.frame.intrinsics = depth_intrinsics(camera, raw.width, raw.height)
+                                   .value_or(CameraIntrinsics{raw.width, raw.height});
       depth.frame.depth = depth_from_raw(raw);
       return SessionMessage{std::move(depth)};
     }
@@ -172,16 +180,19 @@ struct SessionReader::Impl {
     return std::nullopt;
   }
 
-  CameraIntrinsics depth_intrinsics(const std::string& camera, const detail::RawImage& raw) {
-    for (const auto* calibrations : {&depth_calibrations, &camera_calibrations}) {
+  // The calibration so far matching a depth image of this size (or the
+  // first one to come, for an image before it), if any.
+  std::optional<CameraIntrinsics> depth_intrinsics(const std::string& camera, int width,
+                                                   int height) const {
+    for (const auto* calibrations :
+         {&depth_calibrations, &camera_calibrations, &first_depth_calibrations}) {
       auto it_cal = calibrations->find(camera);
-      if (it_cal != calibrations->end() && it_cal->second.width == raw.width &&
-          it_cal->second.height == raw.height) {
+      if (it_cal != calibrations->end() && it_cal->second.width == width &&
+          it_cal->second.height == height) {
         return it_cal->second;
       }
     }
-    throw std::runtime_error("session: no calibration matching depth image size for camera " +
-                             camera);
+    return std::nullopt;
   }
 };
 
@@ -194,6 +205,23 @@ SessionReader::SessionReader(const std::filesystem::path& path) : impl_(std::mak
   // A file without an index can only be read front to back; next_raw() puts
   // it back into time order.
   impl_->indexed = has_message_index(impl_->reader);
+  if (impl_->indexed) {
+    mcap::ReadMessageOptions calibrations;
+    calibrations.topicFilter = [](std::string_view topic) {
+      constexpr std::string_view kSuffix = "/depth/calibration";
+      return starts_with(topic, "/cam/") && topic.size() > kSuffix.size() &&
+             topic.substr(topic.size() - kSuffix.size()) == kSuffix;
+    };
+    calibrations.readOrder = mcap::ReadMessageOptions::ReadOrder::LogTimeOrder;
+    for (const mcap::MessageView& mv :
+         impl_->reader.readMessages([](const mcap::Status&) {}, calibrations)) {
+      const std::string_view topic = mv.channel->topic;
+      const std::string camera(topic.substr(5, topic.find('/', 5) - 5));
+      impl_->first_depth_calibrations.try_emplace(
+          camera, detail::decode_calibration({reinterpret_cast<const char*>(mv.message.data),
+                                              mv.message.dataSize}));
+    }
+  }
   options.readOrder = impl_->indexed ? mcap::ReadMessageOptions::ReadOrder::LogTimeOrder
                                      : mcap::ReadMessageOptions::ReadOrder::FileOrder;
   // Problems (e.g. a file truncated by a crash mid-recording) end reading at
@@ -246,13 +274,23 @@ std::optional<SessionMessage> SessionReader::next() {
     }
     SessionMessage message = std::get<SessionMessage>(std::move(*m));
     if (auto* depth = std::get_if<DepthImage>(&message)) {
-      // Its confidence and labels follow it, usually right after.
+      // Its confidence and labels follow it, usually right after (and
+      // decoding them reads any calibration in between).
       while (d.ahead.size() < kExtrasLookahead) {
         std::optional<Decoded> next = d.next_raw();
         if (!next) {
           break;
         }
         d.ahead.push_back(std::move(*next));
+      }
+      CameraIntrinsics& intrinsics = depth->frame.intrinsics;
+      if (intrinsics.fx == 0.0) {
+        const auto found = d.depth_intrinsics(depth->camera, intrinsics.width, intrinsics.height);
+        if (!found) {
+          throw std::runtime_error(
+              "session: no calibration matching depth image size for camera " + depth->camera);
+        }
+        intrinsics = *found;
       }
       for (auto it = d.ahead.begin(); it != d.ahead.end();) {
         auto* extra = std::get_if<DepthExtra>(&*it);

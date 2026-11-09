@@ -8,6 +8,9 @@
 #include <string>
 #include <vector>
 
+#include <mcap/writer.hpp>
+
+#include "../src/io/messages.hpp"
 #include "test_scene.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/io/map_build.hpp"
@@ -240,6 +243,78 @@ TEST(SessionIo, RoundTripsSemanticLabels) {
   vg::io::SessionWriter writer(file.path(), test_info());
   depth.frame.labels.pop_back();
   EXPECT_THROW(writer.write(depth), std::invalid_argument);
+}
+
+TEST(SessionIo, ReadsDepthWhoseCalibrationComesJustAfter) {
+  // The calibration and the first depth image have the same time, so in time
+  // order the depth image may come first (as phone recordings showed).
+  TempFile file("vg_session_calibration_after");
+  vg::io::DepthImage depth;
+  depth.camera = "rgb";
+  depth.frame.timestamp = 7 * kMs;
+  depth.frame.intrinsics = {2, 1, 1.5, 1.5, 0.5, 0.0};
+  depth.frame.depth = {1.0f, 2.0f};
+  {
+    mcap::McapWriter writer;
+    ASSERT_TRUE(writer.open(file.path().string(), mcap::McapWriterOptions("")).ok());
+    const auto add = [&](const std::string& topic, const std::string& data) {
+      mcap::Channel channel(topic, "protobuf", 0);
+      writer.addChannel(channel);
+      mcap::Message m;
+      m.channelId = channel.id;
+      m.logTime = m.publishTime = static_cast<mcap::Timestamp>(depth.frame.timestamp);
+      m.data = reinterpret_cast<const std::byte*>(data.data());
+      m.dataSize = data.size();
+      ASSERT_TRUE(writer.write(m).ok());
+    };
+    add("/cam/rgb/depth", vg::io::detail::encode_depth(depth));
+    add("/cam/rgb/depth/calibration",
+        vg::io::detail::encode_calibration(depth.frame.timestamp, "cam/rgb",
+                                           depth.frame.intrinsics));
+    writer.close();
+  }
+  const auto messages = read_all(file.path());
+  ASSERT_EQ(messages.size(), 1u);
+  const auto& d = std::get<vg::io::DepthImage>(messages[0]);
+  EXPECT_DOUBLE_EQ(d.frame.intrinsics.fx, 1.5);
+  EXPECT_EQ(d.frame.depth, depth.frame.depth);
+}
+
+TEST(SessionIo, ReadsDepthStampedBeforeItsCalibration) {
+  // A phone recorder wrote its first depth images late, stamped before the
+  // calibration it had written: they use the first calibration to come.
+  TempFile file("vg_session_calibration_later");
+  vg::io::DepthImage depth;
+  depth.camera = "rgb";
+  depth.frame.intrinsics = {2, 1, 1.5, 1.5, 0.5, 0.0};
+  depth.frame.depth = {1.0f, 2.0f};
+  {
+    mcap::McapWriter writer;
+    ASSERT_TRUE(writer.open(file.path().string(), mcap::McapWriterOptions("")).ok());
+    const auto add = [&](const std::string& topic, vg::Timestamp time, const std::string& data) {
+      mcap::Channel channel(topic, "protobuf", 0);
+      writer.addChannel(channel);
+      mcap::Message m;
+      m.channelId = channel.id;
+      m.logTime = m.publishTime = static_cast<mcap::Timestamp>(time);
+      m.data = reinterpret_cast<const std::byte*>(data.data());
+      m.dataSize = data.size();
+      ASSERT_TRUE(writer.write(m).ok());
+    };
+    add("/cam/rgb/depth/calibration", 400 * kMs,
+        vg::io::detail::encode_calibration(400 * kMs, "cam/rgb", depth.frame.intrinsics));
+    for (const vg::Timestamp t : {400 * kMs, 7 * kMs, 100 * kMs}) {
+      depth.frame.timestamp = t;
+      add("/cam/rgb/depth", t, vg::io::detail::encode_depth(depth));
+    }
+    writer.close();
+  }
+  const auto messages = read_all(file.path());
+  ASSERT_EQ(messages.size(), 3u);
+  for (const auto& m : messages) {
+    EXPECT_DOUBLE_EQ(std::get<vg::io::DepthImage>(m).frame.intrinsics.fx, 1.5);
+  }
+  EXPECT_EQ(std::get<vg::io::DepthImage>(messages[0]).frame.timestamp, 7 * kMs);
 }
 
 TEST(SessionIo, RejectsMismatchedDepthSize) {

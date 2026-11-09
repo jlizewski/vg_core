@@ -45,7 +45,7 @@ if(VG_CORE_BUILD_IO)
     mcap_repair_test.cpp
     protobuf_test.cpp
     session_io_test.cpp)
-  target_link_libraries(vg_core_io_tests PRIVATE vg_core::vg_core_io GTest::gtest_main)
+  target_link_libraries(vg_core_io_tests PRIVATE vg_core::vg_core_io vg_mcap GTest::gtest_main)
   vg_core_set_warnings(vg_core_io_tests)
   gtest_discover_tests(vg_core_io_tests)
 endif()
