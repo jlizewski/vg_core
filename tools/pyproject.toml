@@ -13,6 +13,10 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5"]
 schemas = ["grpcio-tools>=1.60"]
+# Reading recordings (vg labels, ...): MCAP with zstd chunks, images and arrays.
+analysis = ["mcap>=1.2", "mcap-protobuf-support>=0.5", "numpy>=1.26", "pillow>=10"]
+# Converting segmentation models to ONNX (vg models export). Large: TensorFlow.
+models = ["tensorflow>=2.16", "tf2onnx>=1.16", "onnx>=1.16", "onnxruntime>=1.18", "numpy>=1.26"]
 
 [project.scripts]
 vg = "vg_tools.cli:main"

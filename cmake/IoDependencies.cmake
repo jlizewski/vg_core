@@ -35,3 +35,12 @@ target_include_directories(vg_mcap SYSTEM INTERFACE ${mcap_SOURCE_DIR}/cpp/mcap/
 # Windows builds would dllimport symbols that live in the same binary.
 target_compile_definitions(vg_mcap INTERFACE MCAP_COMPRESSION_NO_LZ4 MCAP_PUBLIC=)
 target_link_libraries(vg_mcap INTERFACE libzstd_static)
+
+# stb_image (header-only): decoding recorded camera images (JPEG, PNG).
+FetchContent_Declare(stb
+  GIT_REPOSITORY https://github.com/nothings/stb.git
+  GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20
+  SOURCE_SUBDIR do-not-add)
+FetchContent_MakeAvailable(stb)
+add_library(vg_stb INTERFACE)
+target_include_directories(vg_stb SYSTEM INTERFACE ${stb_SOURCE_DIR})

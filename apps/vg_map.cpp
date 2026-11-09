@@ -1,8 +1,8 @@
-// vg_map: re-run derived stages (voxels, surface, ground, sun, layers) of a map package from its saved 3D map.
+// vg_map: re-run derived stages (voxels, surface, ground, terrain, sun, layers) of a map package from its saved 3D map.
 //
 //   vg_map <package_dir> <stage>... [--config FILE] [--set PATH=VALUE] [flags]
 //
-// Stages: voxels, surface, ground, sun, layers (a ghost surface diagnostic),
+// Stages: voxels, surface, ground, terrain, sun, layers (a ghost surface diagnostic),
 // or all (the `pipeline` setting). Each reads the package's map.vgm (and sun
 // reads ground.asc), so tweaking how a map is derived doesn't need the
 // recording, e.g.
@@ -30,7 +30,7 @@ namespace {
 
 int usage(const vg::config::ParamSet& params) {
   std::cerr << "usage: vg_map <package_dir> <stage>... [settings]\n"
-               "stages: voxels, surface, ground, sun, semantic, layers, or all (the pipeline setting)\n"
+               "stages: voxels, surface, ground, terrain, sun, semantic, layers, or all (the pipeline setting)\n"
             << params.flags_help();
   return 2;
 }

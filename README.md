@@ -151,7 +151,10 @@ garden/
   voxels.ply       its occupied voxels as cubes (MeshLab, Blender, CloudCompare)
   surface.asc      height of the highest surface per cell (m)
   ground.asc       height of the bare ground per cell, holes under objects patched (m)
+  ground_patched.asc  1 where ground.asc was patched rather than seen (diagnostic)
   objects.ply      everything on or over the ground
+  terrain.asc      smooth contour of the ground, from the seen ground and the walk (m)
+  features.asc     height of the surface above the terrain: beds, mounds, plants (m)
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
   labels.ply       voxels colored by semantic class (when the recording has labels)
@@ -173,8 +176,9 @@ vg map garden/ all --cell 0.1                # every 2D map at 10 cm
 ```
 
 The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`),
-`sun`, which reads `ground.asc`, so re-run `sun` after `ground`, and the
-diagnostic `layers`. In code they're `vg::MapPackage`
+`terrain` (reads `ground.asc`, `surface.asc` and `trajectory.csv`), `sun`,
+which reads `ground.asc`, so re-run `sun` after `ground`, and the diagnostic
+`layers`. In code they're `vg::MapPackage`
 ([map_package.hpp](include/vg_core/map_package.hpp)), and the build stage is
 `vg::io::build_map_package()`.
 
@@ -191,7 +195,7 @@ build:
     max_depth: 3.0
 ground:
   max_slope: 0.6
-pipeline: [voxels, surface, ground, sun, layers]
+pipeline: [voxels, surface, ground, terrain, sun, layers]
 ```
 
 ```sh
@@ -258,8 +262,97 @@ what single-frame labels get wrong, and stages ask the map by class.
   highest labeled voxel (1 ground ... 6 dynamic), i.e. what's seen from above.
 - `semantics.min_votes` is how many votes a voxel's class needs (fewer leave it
   unknown); `vg mcap stats` shows the share of each class in a recording.
+- The `ground` stage uses the labels alongside its slope rules
+  (`ground.labels`): a column whose bottom voxel is labeled plant, tree,
+  structure or dynamic isn't ground, so low plants and the feet of walls and
+  fences stop reading as raised ground, and the ground there is patched from
+  the lawn around it. The ground everything else is judged against is the
+  region with the most columns labeled ground, not just the largest one (a big
+  deck can't take its place). Each object in `objects.ply` gets the class most
+  of its voxels have (in the manifest). `ground_patched.asc` shows which cells
+  were patched rather than seen.
+- `ground.labels.rescue` (off by default) also keeps small, isolated patches
+  labeled ground. On a real yard it took in surfaces a meter up, since a deck
+  or porch floor labeled ground can't be told from ground rising behind an
+  obstacle.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
+
+### Terrain
+
+`ground.asc` is the ground where it was seen, patched in between. The
+`terrain` stage fits a smooth contour to it (`terrain.asc`, nodes every
+`terrain.node_spacing`, 0.5 m) and adds a second kind of evidence: the walk.
+The phone is carried at a steady height (on a measured walk, 1.56 m over the
+seen ground, +-18 cm), so the camera's path less that height is the ground
+underfoot. One point is rough, but many pin the ground down where it's hidden
+(overgrowth) and show up "ground" that is really foliage:
+
+- The phone's height is solved for (`terrain.path.phone_height: auto`), from
+  where the path crosses seen ground.
+- The fit starts from the walk, then brings in the seen ground with robust
+  weights: ground well above the fit (`terrain.above_scale`) counts for little
+  where the walk disagrees with it. A node's area of seen ground counts as one
+  observation, so a patch of foliage can't outvote the walk by its size.
+- `features.asc` is `surface.asc` less the terrain: what stands on the land.
+- The manifest records the phone height and how many ground cells were
+  discounted (most of them near plants).
+
+`vg path stats garden/` shows how the walk relates to the ground: how steady the
+phone's height is, whether it reads lower near plants, and the longest stretches
+walked without seen ground underfoot.
+
+To check a labeled recording:
+
+```sh
+vg mcap stats rec.vgcap.mcap        # share of each class, and how many frames have labels
+vg labels perf rec.labels.csv       # the phone's inference time, latency, heat (CSV from the app)
+vg labels frames rec.vgcap.mcap out/ --at 20 60 120   # PNGs: image | labels over it | depth over it
+```
+
+`vg labels frames` is the alignment check: the labels and depth are drawn over
+the camera image they came from, so their edges should land on the image's
+(trunks, fences, table tops). The depth covers the whole camera image, stretched
+to its aspect ratio (`--fov stretch`, as the recorded depth intrinsics say);
+`--fov crop` draws the other possibility, a centered crop, for comparison.
+
+### Segmentation everywhere, and on this computer
+
+Segmentation itself is in vg_core, so the phone, a future iOS app, a ROS2 node
+and the desktop all label alike: `vg::Segmenter`
+([segmentation.hpp](include/vg_core/segmentation.hpp)) turns a camera image
+upright from the camera's pose, runs a model, maps its classes to vg's and
+shrinks the result to the depth image. Only running the model differs per
+platform, behind `vg::InferenceBackend`: on the desktop it's ONNX Runtime
+(`vg_core_onnx`, [onnx_backend.hpp](include/vg_core/onnx_backend.hpp); the
+`VG_CORE_BUILD_ONNX` CMake option, on by default in a desktop checkout, fetches a
+pinned release).
+
+That lets a recording be relabeled on this computer, e.g. with another model or
+class mapping, and the results compared without walking the yard again:
+
+```sh
+vg models export deeplabv3_mnv2_ade20k deeplabv3_mnv2_ade20k.tflite   # once: models/*.onnx
+vg models export segformer_b0_ade20k        # from its PyTorch weights on Hugging Face
+vg segment rec.mcap rec.segformer.mcap --model segformer_b0_ade20k
+vg segment rec.mcap rec.desktop.mcap        # the same recording, relabeled here
+vg labels compare rec.mcap rec.desktop.mcap # agreement, per-class IoU, confusion
+vg replay rec.desktop.mcap pkg/             # and what the labels do to the maps
+```
+
+`vg models export` checks that the ONNX model picks the `.tflite`'s class on
+random input (100% for DeepLabV3), so desktop labels stand in for the phone's.
+On the Oct 16 recording the desktop's and the phone's labels agree on 81% of
+pixels per frame (JPEG versus the raw camera image, the phone GPU's lower
+precision), but their maps agree: DeepLabV3's labels flip on about a fifth of
+pixels at the slightest change, which the per-voxel votes smooth out.
+
+So per-pixel agreement has a noise floor around 80% even for the same model,
+and the better measure of a model is **label consistency**: with labels, `vg
+replay` logs (and the manifest records) the share of each frame's labels that
+agree with the map's class where they land, per class. It needs no ground truth:
+steady labels agree with the map, flipping ones don't. DeepLabV3 on the Oct 16
+walk: 85% overall; ground 95%, structure 88%, tree 52%, plant 44%.
 
 > **TODO before shipping the app: re-evaluate the segmentation model.**
 > The first model (an off-the-shelf ADE20K model plus a class-mapping table)
@@ -353,7 +446,15 @@ pytest tools        # test the tools themselves
 vg schemas          # regenerate src/io/schema_descriptors.cpp after editing schemas/
                     # (needs: pip install -e "tools[schemas]")
 vg heatmap in.asc out.png [--scale 4] [--min V --max V]  # render a grid as a heatmap PNG
-vg preview dir/     # render every .asc in a directory as a PNG
+vg preview dir/     # render every .asc in a directory as a PNG (semantic.asc by class)
+vg labels perf rec.labels.csv    # the phone's segmentation speed and heat
+vg labels frames rec.mcap out/   # labels and depth over the camera image, per frame
+vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
+                    # (both need: pip install -e "tools[analysis]")
+vg path stats garden/            # the phone's height over the ground along the walk
+vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
+                    # (needs: pip install -e "tools[models]", large: TensorFlow)
+vg segment rec.mcap out.mcap     # vg_segment: relabel a recording on this computer
 vg replay ...       # run a C++ app from apps/ (here vg_replay), building it first
 vg map ...          # vg_map
 vg mcap repair ...  # vg_mcap_repair

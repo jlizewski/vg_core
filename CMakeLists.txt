@@ -20,6 +20,16 @@ option(VG_CORE_BUILD_IO "Build vg_core_io (capture session recording and playbac
 option(VG_CORE_BUILD_APPS "Build command-line apps such as vg_replay" ${_vg_core_tests_default})
 option(VG_CORE_BUILD_CONFIG
   "Build vg_core_config (mapping settings in YAML files; needs vg_core_io)" ON)
+# Desktop segmentation (ONNX Runtime) for the vg segment tool. On by default in
+# a desktop checkout; phones bring their own runtime.
+if(PROJECT_IS_TOP_LEVEL AND NOT ANDROID AND NOT IOS)
+  set(_vg_core_onnx_default ON)
+else()
+  set(_vg_core_onnx_default OFF)
+endif()
+option(VG_CORE_BUILD_ONNX
+  "Build vg_core_onnx (segmentation with ONNX Runtime, downloaded) and vg segment"
+  ${_vg_core_onnx_default})
 
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -32,13 +42,16 @@ add_library(vg_core
   src/ground_segmentation.cpp
   src/height_map.cpp
   src/height_map_io.cpp
+  src/label_consistency.cpp
   src/live_height_map.cpp
   src/map_builder.cpp
   src/map_package.cpp
   src/pose_jumps.cpp
+  src/segmentation.cpp
   src/semantics.cpp
   src/solar.cpp
   src/sun_map.cpp
+  src/terrain.cpp
   src/tsdf_volume.cpp
   src/voxel_cleanup.cpp
   src/voxel_map_io.cpp
@@ -66,6 +79,7 @@ target_include_directories(vg_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 if(VG_CORE_BUILD_IO)
   include(cmake/IoDependencies.cmake)
   add_library(vg_core_io
+    src/io/image_decode.cpp
     src/io/map_build.cpp
     src/io/mcap_impl.cpp
     src/io/mcap_repair.cpp
@@ -77,9 +91,20 @@ if(VG_CORE_BUILD_IO)
     src/io/session_reader.cpp
     src/io/session_writer.cpp)
   add_library(vg_core::vg_core_io ALIAS vg_core_io)
-  target_link_libraries(vg_core_io PUBLIC vg_core PRIVATE vg_mcap)
+  target_link_libraries(vg_core_io PUBLIC vg_core PRIVATE vg_mcap vg_stb)
   set_target_properties(vg_core_io PROPERTIES CXX_EXTENSIONS OFF)
   vg_core_set_warnings(vg_core_io)
+
+  # Segmentation on the desktop: an InferenceBackend running ONNX models with
+  # ONNX Runtime (include/vg_core/onnx_backend.hpp).
+  if(VG_CORE_BUILD_ONNX)
+    include(cmake/OnnxDependencies.cmake)
+    add_library(vg_core_onnx src/onnx/onnx_backend.cpp)
+    add_library(vg_core::vg_core_onnx ALIAS vg_core_onnx)
+    target_link_libraries(vg_core_onnx PUBLIC vg_core PRIVATE onnxruntime::onnxruntime)
+    set_target_properties(vg_core_onnx PROPERTIES CXX_EXTENSIONS OFF)
+    vg_core_set_warnings(vg_core_onnx)
+  endif()
 
   # Mapping settings: every tunable parameter of the map package pipeline,
   # read from YAML files and command-line flags. Kept out of vg_core so the
@@ -102,8 +127,18 @@ if(VG_CORE_BUILD_IO)
     file(GLOB _vg_core_apps CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/apps/vg_*.cpp)
     foreach(source ${_vg_core_apps})
       get_filename_component(app ${source} NAME_WE)
+      if(app STREQUAL "vg_segment" AND NOT TARGET vg_core_onnx)
+        continue()  # Needs ONNX Runtime.
+      endif()
       add_executable(${app} ${source})
       target_link_libraries(${app} PRIVATE vg_core_config)
+      if(app STREQUAL "vg_segment")
+        target_link_libraries(${app} PRIVATE vg_core_onnx)
+        # Where `vg models export` puts models: the default place to look.
+        target_compile_definitions(${app} PRIVATE
+          VG_CORE_MODELS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/models")
+        vg_core_copy_onnxruntime(${app})
+      endif()
       vg_core_set_warnings(${app})
     endforeach()
   endif()

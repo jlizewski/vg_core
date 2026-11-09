@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <locale>
 #include <optional>
 #include <variant>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "vg_core/geo_reference.hpp"
+#include "vg_core/label_consistency.hpp"
 #include "vg_core/io/session_player.hpp"
 #include "vg_core/io/session_reader.hpp"
 #include "vg_core/map_package.hpp"
@@ -41,6 +43,9 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   std::vector<std::pair<double, Eigen::Vector3d>> camera_path;
   std::size_t outside_window = 0;
   std::size_t frames_with_confidence = 0;
+  // Classes the map drops can't agree with it; leave them out.
+  LabelConsistency consistency(4, config.tsdf.max_depth, config.tsdf.drop_labels);
+  Eigen::Isometry3d body_from_camera = Eigen::Isometry3d::Identity();
   const std::size_t messages = play(
       reader,
       [&](const SessionMessage& m) {
@@ -71,8 +76,17 @@ BuildSummary build_map_package(const std::filesystem::path& session,
         mapper.handle(m);
         if (const auto* fix = std::get_if<GpsFix>(&m)) {
           fixes.push_back(*fix);
+        } else if (const auto* tf = std::get_if<StaticTransforms>(&m)) {
+          for (const auto& t : tf->transforms) {
+            if (t.parent_frame == "body" && t.child_frame.rfind("cam/", 0) == 0) {
+              body_from_camera = t.parent_from_child;
+            }
+          }
         } else if (const auto* depth = std::get_if<DepthImage>(&m)) {
           ++depth_frames;
+          if (options.label_consistency && !poses.empty()) {
+            consistency.add(depth->frame, poses.back().world_from_frame * body_from_camera);
+          }
           frames_with_confidence += depth->frame.confidence.empty() ? 0 : 1;
           // When watching it replay live, refresh the live height map every 10
           // depth frames, as an app would a few times a second.
@@ -116,6 +130,23 @@ BuildSummary build_map_package(const std::filesystem::path& session,
       << ", so voxels need a fused weight of " << min_weight
       << (options.min_weight ? "" : " (set --min-weight to change)") << '\n';
 
+  // How steady the labels are, against the map's votes.
+  LabelConsistency::Result agreement;
+  if (consistency.samples() > 0) {
+    agreement = consistency.score(builder.volume(), options.label_consistency_votes);
+    log << "label consistency: " << std::fixed << std::setprecision(1)
+        << 100.0 * agreement.overall() << "% of " << agreement.total()
+        << " sampled labeled readings agree with the map's class there;";
+    for (std::size_t c = 1; c < kSemanticClasses; ++c) {
+      const auto cls = static_cast<SemanticClass>(c);
+      if (agreement.readings[c] > 0) {
+        log << ' ' << semantic_class_name(cls) << ' ' << 100.0 * agreement.of_class(cls) << '%';
+      }
+      // (Classes the map drops, such as sky and dynamic, aren't scored.)
+    }
+    log << std::defaultfloat << std::setprecision(6) << '\n';
+  }
+
   MapMetadata metadata;
   metadata.session = session.filename().string();
   metadata.cell_size = options.cell_size;
@@ -155,6 +186,16 @@ BuildSummary build_map_package(const std::filesystem::path& session,
       .add("from_s", options.from)
       .add("to_s", options.to)
       .add("seconds", seconds);
+  if (agreement.total() > 0) {
+    settings.add("label_consistency", agreement.overall());
+    for (std::size_t c = 1; c < kSemanticClasses; ++c) {
+      const auto cls = static_cast<SemanticClass>(c);
+      if (agreement.readings[c] > 0) {
+        settings.add("label_consistency_" + std::string(semantic_class_name(cls)),
+                     agreement.of_class(cls));
+      }
+    }
+  }
   create_map_package(dir, builder.volume(), metadata, settings, log);
   // The camera's path, as fused (one point per depth frame), for overlaying
   // on the maps, e.g. in CloudCompare.
@@ -164,7 +205,7 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   for (const auto& [t, position] : camera_path) {
     path_file << t << ',' << position.x() << ',' << position.y() << ',' << position.z() << '\n';
   }
-  return {min_weight, confidence};
+  return {min_weight, confidence, agreement.overall()};
 }
 
 }  // namespace vg::io

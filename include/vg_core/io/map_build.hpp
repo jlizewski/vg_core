@@ -36,12 +36,19 @@ struct BuildOptions {
   // of a tracking jump and compare them. Poses, GPS etc. are always read.
   double from = 0.0;
   double to = std::numeric_limits<double>::infinity();
+  // With semantic labels: score how well each frame's labels agree with the
+  // map's votes (label_consistency.hpp), with this many votes needed.
+  bool label_consistency = true;
+  int label_consistency_votes = 2;
 };
 
 // What the build settled on where options left it to the data.
 struct BuildSummary {
   float min_weight = 0.0f;
   bool depth_has_confidence = false;
+  // Share of labeled readings agreeing with the map's class there (0 without
+  // labels), overall.
+  double label_consistency = 0.0;
 };
 
 // Rebuilds the 3D map from the session and starts a map package in dir with

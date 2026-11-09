@@ -11,6 +11,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 
 #include "vg_core/diagnostics.hpp"
@@ -35,12 +36,18 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 12> kFiles = {{
+constexpr std::array<FileInfo, 15> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
     {package_file::kGround, "m", "Height of the bare ground per cell, holes under objects patched"},
+    {package_file::kGroundPatched, "",
+     "Diagnostic: 1 where ground.asc is patched (interpolated), 0 where it was seen"},
     {package_file::kObjects, "m", "Voxels of everything on or over the ground"},
+    {package_file::kTerrain, "m",
+     "Smooth contour of the ground, fitted to the seen ground and the walked path"},
+    {package_file::kFeatures, "m",
+     "Height of the surface above the terrain: beds, mounds, plants, structures"},
     {package_file::kSunHours, "h", "Hours of direct sun per ground cell over the year"},
     {package_file::kSunEnergy, "kWh/m^2",
      "Clear-sky direct solar energy per ground cell over the year"},
@@ -57,8 +64,9 @@ constexpr std::array<FileInfo, 12> kFiles = {{
 }};
 
 // Stages in the order they run, for the manifest.
-constexpr std::array<const char*, 8> kStages = {"build",  "voxels", "labels", "surface",
-                                                "ground", "sun",    "semantic", "layers"};
+constexpr std::array<const char*, 9> kStages = {"build",  "voxels",  "labels",
+                                                "surface", "ground", "terrain",
+                                                "sun",    "semantic", "layers"};
 
 std::string json_number(double value) {
   if (!std::isfinite(value)) {
@@ -453,9 +461,25 @@ void MapPackage::make_ground(const GroundOptions& options) {
   GroundConfig config = options.config;
   config.cell_size = options.cell_size.value_or(map_.metadata.cell_size);
   const double voxel_size = map_.volume.config().voxel_size;
-  const GroundSegmentation split = segment_ground(occupied(), voxel_size, config);
+  // Each voxel's voted class, when the map has labels.
+  std::vector<SemanticClass> labels;
+  const bool labeled = config.use_labels && map_.volume.has_labels();
+  if (labeled) {
+    labels.reserve(occupied().size());
+    for (const auto& v : occupied()) {
+      labels.push_back(map_.volume.label_of(v, min_label_votes_).value_or(SemanticClass::Unknown));
+    }
+  }
+  const GroundSegmentation split = segment_ground(occupied(), voxel_size, config, labels);
 
   save_height_map(split.ground.heights, path(package_file::kGround));
+  HeightMap patched_map = split.ground.heights;
+  for (std::size_t i = 0; i < patched_map.heights.size(); ++i) {
+    if (!std::isnan(patched_map.heights[i])) {
+      patched_map.heights[i] = split.ground.filled[i] != 0 ? 1.0f : 0.0f;
+    }
+  }
+  save_height_map(patched_map, path(package_file::kGroundPatched));
   std::vector<Eigen::Vector3i> objects;
   std::size_t grounded = 0;
   for (const MapSegment& segment : split.segments) {
@@ -467,24 +491,153 @@ void MapPackage::make_ground(const GroundOptions& options) {
   for (const auto f : split.ground.filled) {
     patched += f;
   }
+  // Objects by what they mostly are.
+  std::array<std::size_t, kSemanticClasses> objects_by_label{};
+  for (const MapSegment& segment : split.segments) {
+    ++objects_by_label[static_cast<std::size_t>(segment.label)];
+  }
 
-  update_manifest(dir_, map_.metadata, voxel_size, "ground",
-                  StageSettings()
-                      .add("cell_size_m", config.cell_size)
-                      .add("min_weight", map_.volume.config().min_weight)
-                      .add("min_blob_m3", min_blob_volume_)
-                      .add("max_slope", config.max_slope)
-                      .add("step_tolerance_m", config.step_tolerance)
-                      .add("max_gap_m", config.max_gap)
-                      .add("min_isolated_area_m2", config.min_isolated_area)
-                      .add("max_hole_area_m2", config.max_hole_area)
-                      .add("ground_voxels", split.ground_voxels.size())
-                      .add("objects", split.segments.size())
-                      .add("objects_grounded", grounded));
+  StageSettings settings;
+  settings.add("cell_size_m", config.cell_size)
+      .add("min_weight", map_.volume.config().min_weight)
+      .add("min_blob_m3", min_blob_volume_)
+      .add("max_slope", config.max_slope)
+      .add("step_tolerance_m", config.step_tolerance)
+      .add("max_gap_m", config.max_gap)
+      .add("min_isolated_area_m2", config.min_isolated_area)
+      .add("max_hole_area_m2", config.max_hole_area)
+      .add("ground_voxels", split.ground_voxels.size())
+      .add("objects", split.segments.size())
+      .add("objects_grounded", grounded)
+      .add("use_labels", labeled)
+      .add("columns_not_ground_by_label", split.columns_not_ground_by_label);
+  if (labeled) {
+    for (std::size_t c = 0; c < kSemanticClasses; ++c) {
+      settings.add(std::string(semantic_class_name(static_cast<SemanticClass>(c))) + "_objects",
+                   objects_by_label[c]);
+    }
+  }
+  update_manifest(dir_, map_.metadata, voxel_size, "ground", settings);
   log_ << "ground: " << split.ground.heights.width << " x " << split.ground.heights.height
        << " cells (" << patched << " patched), " << split.segments.size() << " objects ("
        << grounded << " standing on the ground) -> " << package_file::kGround << ", "
-       << package_file::kObjects << " (" << seconds_since(start) << " s)\n";
+       << package_file::kObjects << " (" << seconds_since(start) << " s)" << std::endl;
+  if (labeled) {
+    log_ << "ground: " << split.columns_not_ground_by_label
+         << " columns not ground by their label; objects:";
+    for (std::size_t c = 0; c < kSemanticClasses; ++c) {
+      log_ << ' ' << semantic_class_name(static_cast<SemanticClass>(c)) << ' '
+           << objects_by_label[c];
+    }
+    log_ << std::endl;
+  }
+}
+
+bool MapPackage::make_terrain(const TerrainOptions& options) {
+  if (!std::filesystem::is_regular_file(path(package_file::kGround))) {
+    log_ << "terrain: skipped, no " << package_file::kGround
+         << " (run the ground stage first)" << std::endl;
+    return false;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const HeightMap ground = load_height_map(path(package_file::kGround));
+  std::vector<std::uint8_t> patched;
+  if (std::filesystem::is_regular_file(path(package_file::kGroundPatched))) {
+    const HeightMap flags = load_height_map(path(package_file::kGroundPatched));
+    if (flags.width == ground.width && flags.height == ground.height) {
+      for (const float f : flags.heights) {
+        patched.push_back(!std::isnan(f) && f != 0.0f ? 1 : 0);
+      }
+    }
+  }
+  // The camera's path: t,x,y,z per line after the header.
+  std::vector<Eigen::Vector3d> walk;
+  if (options.config.use_path) {
+    std::ifstream in(path(package_file::kTrajectory));
+    in.imbue(std::locale::classic());
+    std::string line;
+    std::getline(in, line);
+    while (std::getline(in, line)) {
+      std::istringstream fields(line);
+      fields.imbue(std::locale::classic());
+      double t = 0.0;
+      Eigen::Vector3d p;
+      char comma = 0;
+      if (fields >> t >> comma >> p.x() >> comma >> p.y() >> comma >> p.z()) {
+        walk.push_back(p);
+      }
+    }
+    if (walk.empty()) {
+      log_ << "terrain: no " << package_file::kTrajectory
+           << " to use the walked path from; fitting the seen ground alone" << std::endl;
+    }
+  }
+  const TerrainConfig& config = options.config;
+  const Terrain terrain = fit_terrain(ground, patched, walk, config);
+  save_height_map(terrain.heights, path(package_file::kTerrain));
+
+  // What stands on the terrain: the surface above it.
+  std::size_t feature_cells = 0;
+  if (std::filesystem::is_regular_file(path(package_file::kSurface))) {
+    HeightMap features = load_height_map(path(package_file::kSurface));
+    const HeightMap& t = terrain.heights;
+    for (int y = 0; y < features.height; ++y) {
+      for (int x = 0; x < features.width; ++x) {
+        float& value = features.heights[static_cast<std::size_t>(y) *
+                                            static_cast<std::size_t>(features.width) +
+                                        static_cast<std::size_t>(x)];
+        const Eigen::Vector2d center =
+            features.origin + Eigen::Vector2d(x + 0.5, y + 0.5) * features.cell_size;
+        const Eigen::Vector2d f = (center - t.origin) / t.cell_size;
+        const int tx = static_cast<int>(std::floor(f.x()));
+        const int ty = static_cast<int>(std::floor(f.y()));
+        if (std::isnan(value) || tx < 0 || ty < 0 || tx >= t.width || ty >= t.height ||
+            !t.has_data(tx, ty)) {
+          value = std::numeric_limits<float>::quiet_NaN();
+          continue;
+        }
+        value -= static_cast<float>(terrain.model.at(center));
+        ++feature_cells;
+      }
+    }
+    save_height_map(features, path(package_file::kFeatures));
+  } else {
+    std::filesystem::remove(path(package_file::kFeatures));
+  }
+
+  update_manifest(dir_, map_.metadata, map_.volume.config().voxel_size, "terrain",
+                  StageSettings()
+                      .add("node_spacing_m", config.node_spacing)
+                      .add("bend_m", config.bend)
+                      .add("ground_sigma_m", config.ground_sigma)
+                      .add("above_scale_m", config.above_scale)
+                      .add("below_scale_m", config.below_scale)
+                      .add("iterations", config.iterations)
+                      .add("use_path", config.use_path)
+                      .add("path_sigma_m", config.path_sigma)
+                      .add("path_scale_m", config.path_scale)
+                      .add("path_spacing_m", config.path_spacing)
+                      .add("reach_m", config.reach)
+                      .add("phone_height_m", terrain.phone_height)
+                      .add("phone_height_solved", terrain.phone_height_solved)
+                      .add("ground_cells", terrain.ground_cells)
+                      .add("path_points", terrain.path_points)
+                      .add("ground_cells_discounted", terrain.ground_cells_discounted)
+                      .add("ground_cells_discounted_above", terrain.ground_cells_discounted_above)
+                      .add("ground_residual_m", terrain.ground_residual)
+                      .add("path_residual_m", terrain.path_residual)
+                      .add("feature_cells", feature_cells));
+  log_ << "terrain: " << terrain.model.width << " x " << terrain.model.height << " nodes from "
+       << terrain.ground_cells << " seen ground cells and " << terrain.path_points
+       << " path points; phone " << terrain.phone_height << " m above it ("
+       << (terrain.phone_height_solved ? "solved" : config.phone_height ? "given" : "default")
+       << "); median off it: ground " << terrain.ground_residual << " m, path "
+       << terrain.path_residual << " m; " << terrain.ground_cells_discounted
+       << " ground cells discounted (" << terrain.ground_cells_discounted_above
+       << " above it) -> " << package_file::kTerrain
+       << (feature_cells > 0 ? std::string(", ") + package_file::kFeatures : std::string())
+       << " (" << seconds_since(start) << " s)" << std::endl;
+  return true;
 }
 
 bool MapPackage::make_sun(const SunOptions& options) {

@@ -11,6 +11,8 @@ import zlib
 from dataclasses import dataclass
 from pathlib import Path
 
+from vg_tools import semantics
+
 # Inferno-like color stops: dark (least) to pale yellow (most).
 STOPS = (
     (0.0, (0, 0, 4)),
@@ -28,9 +30,28 @@ class Grid:
     cellsize: float
     # Top row first, as in the file. None where there is no data.
     rows: list[list[float | None]]
+    # Lower left corner of the grid, in the map frame (meters).
+    xllcorner: float = 0.0
+    yllcorner: float = 0.0
 
     def values(self) -> list[float]:
         return [v for row in self.rows for v in row if v is not None]
+
+    def cell_of(self, x: float, y: float) -> tuple[int, int] | None:
+        """(row, column) of the cell holding map point (x, y), or None outside."""
+        c = int((x - self.xllcorner) // self.cellsize)
+        r = self.nrows - 1 - int((y - self.yllcorner) // self.cellsize)
+        return (r, c) if 0 <= r < self.nrows and 0 <= c < self.ncols else None
+
+    def at(self, x: float, y: float) -> float | None:
+        """The value at map point (x, y): None outside the grid or with no data."""
+        cell = self.cell_of(x, y)
+        return None if cell is None else self.rows[cell[0]][cell[1]]
+
+    def center(self, r: int, c: int) -> tuple[float, float]:
+        """Map point at the center of cell (row, column)."""
+        return (self.xllcorner + (c + 0.5) * self.cellsize,
+                self.yllcorner + (self.nrows - 1 - r + 0.5) * self.cellsize)
 
 
 def read_ascii_grid(path: Path) -> Grid:
@@ -58,7 +79,8 @@ def read_ascii_grid(path: Path) -> Grid:
             v = float(data[r * ncols + c])
             row.append(None if v != v or (nodata is not None and v == nodata) else v)
         rows.append(row)
-    return Grid(ncols, nrows, cellsize, rows)
+    return Grid(ncols, nrows, cellsize, rows, header.get("xllcorner", 0.0),
+                header.get("yllcorner", 0.0))
 
 
 def color(t: float) -> tuple[int, int, int]:
@@ -108,6 +130,19 @@ def render(
     return encode_png(grid.ncols * scale, grid.nrows * scale, rows), lo, hi
 
 
+def render_classes(grid: Grid, scale: int = 1) -> bytes:
+    """PNG bytes of a grid of semantic class ids (semantic.asc), each class in
+    its own color (vg_tools.semantics)."""
+    rows = []
+    for row in grid.rows:
+        line = bytearray()
+        for v in row:
+            px = b"\x00\x00\x00\x00" if v is None else bytes((*semantics.color(int(v)), 255))
+            line += px * scale
+        rows.extend([bytes(line)] * scale)
+    return encode_png(grid.ncols * scale, grid.nrows * scale, rows)
+
+
 def write_heatmap(
     src: Path,
     dst: Path,
@@ -128,7 +163,10 @@ def write_previews(directory: Path, scale: int = 4) -> list[Path]:
         if grid.ncols == 0 or grid.nrows == 0:
             continue  # An empty map, e.g. from a session without depth.
         png = path.with_suffix(".png")
-        data, _, _ = render(grid, scale)
+        if path.name == "semantic.asc":
+            data = render_classes(grid, scale)
+        else:
+            data, _, _ = render(grid, scale)
         png.write_bytes(data)
         written.append(png)
     return written
