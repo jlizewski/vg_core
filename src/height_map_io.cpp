@@ -52,6 +52,10 @@ void write_height_map_ascii(const HeightMap& map, std::ostream& out) {
 HeightMap read_height_map_ascii(std::istream& in) {
   in.imbue(std::locale::classic());
   HeightMap map;
+  // Unset until read: 0 is a valid size (an empty map, as written for an
+  // empty package), a missing one isn't.
+  map.width = -1;
+  map.height = -1;
   bool center = false;
   double nodata = kHeightMapNoData;
 
@@ -85,7 +89,7 @@ HeightMap read_height_map_ascii(std::istream& in) {
       throw std::runtime_error("height map: bad value for " + key);
     }
   }
-  if (map.width <= 0 || map.height <= 0 || map.cell_size <= 0.0) {
+  if (map.width < 0 || map.height < 0 || map.cell_size <= 0.0) {
     throw std::runtime_error("height map: missing or invalid ncols, nrows or cellsize");
   }
   if (center) {

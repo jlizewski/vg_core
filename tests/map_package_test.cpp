@@ -162,6 +162,23 @@ TEST_F(MapPackageTest, TerrainFromTheGroundAndTheWalk) {
   EXPECT_NE(manifest.find("\"name\": \"features.asc\""), std::string::npos) << manifest;
 }
 
+TEST(MapPackageEmptyTest, StagesRunOnAnEmptyMap) {
+  // A recording that fused nothing (e.g. no depth) still makes a package.
+  const fs::path dir = fs::temp_directory_path() / "vg_map_package_empty";
+  fs::remove_all(dir);
+  vg::MapMetadata metadata;
+  metadata.cell_size = 0.1524;
+  std::ostringstream log;
+  vg::create_map_package(dir, vg::TsdfVolume(vg::TsdfConfig{}), metadata, vg::StageSettings(),
+                         log);
+  vg::MapPackage package(dir, log);
+  package.make_surface();
+  package.make_ground();
+  EXPECT_TRUE(package.make_terrain());
+  EXPECT_EQ(vg::load_height_map(dir / file::kTerrain).width, 0);
+  fs::remove_all(dir);
+}
+
 TEST_F(MapPackageTest, SunNeedsALocationAndGround) {
   vg::MapPackage package(dir_, log_);
   EXPECT_FALSE(package.make_sun(quick_sun()));  // No ground yet.

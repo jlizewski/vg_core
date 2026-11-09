@@ -81,6 +81,22 @@ TEST(HeightMapIo, RejectsTruncatedGrid) {
   EXPECT_THROW(vg::read_height_map_ascii(in), std::runtime_error);
 }
 
+TEST(HeightMapIo, RoundTripsAnEmptyMap) {
+  vg::HeightMap empty;
+  empty.cell_size = 0.1524;
+  std::stringstream io;
+  vg::write_height_map_ascii(empty, io);
+  const auto map = vg::read_height_map_ascii(io);
+  EXPECT_EQ(map.width, 0);
+  EXPECT_EQ(map.height, 0);
+  EXPECT_TRUE(map.heights.empty());
+}
+
+TEST(HeightMapIo, RejectsMissingSize) {
+  std::istringstream in("nrows 1\nxllcorner 0\nyllcorner 0\ncellsize 1\n1\n");
+  EXPECT_THROW(vg::read_height_map_ascii(in), std::runtime_error);
+}
+
 TEST(HeightMapIo, ThrowsOnMissingFile) {
   EXPECT_THROW(vg::load_height_map("does/not/exist.asc"), std::runtime_error);
 }

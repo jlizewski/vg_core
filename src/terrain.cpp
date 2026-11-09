@@ -132,6 +132,8 @@ Terrain fit_terrain(const HeightMap& ground, const std::vector<std::uint8_t>& pa
   }
   terrain.ground_cells = seen.size();
   terrain.path_points = walk.size();
+  terrain.heights.cell_size = cell;
+  terrain.phone_height = config.phone_height.value_or(config.default_phone_height);
   if (seen.empty() && walk.empty()) {
     return terrain;
   }
