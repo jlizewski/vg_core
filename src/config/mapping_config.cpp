@@ -336,6 +336,51 @@ ParamSet bind(MappingConfig& c) {
   p.add("semantics.min_votes", c.min_label_votes,
         "Votes a voxel's class needs to count; with fewer it's unknown.");
 
+  p.section("site",
+            "Registering walks into a site (vg site add): one place mapped over many visits. "
+            "The heading and shift are found from the maps; GPS only narrows the search.");
+  RegistrationConfig& reg = c.registration;
+  p.add("site.use_gps", reg.use_gps,
+        "Use the walks' GPS headings and positions, when they have them: they narrow the "
+        "heading search and break near ties between fits.");
+  p.add("site.gps_position_sigma", reg.gps_position_sigma,
+        "1-sigma error of a walk's GPS position relative to another walk's, in meters (walks "
+        "on the same day share most of their GPS error).");
+  p.add("site.raster", reg.raster, "Grid of the coarse search, in meters.");
+  p.add("site.min_feature_height", reg.min_feature_height,
+        "Features (features.asc) shorter than this are left out of the coarse search, in "
+        "meters: low bumps match anywhere.");
+  p.add("site.search_radius", reg.search_radius,
+        "How far apart two walks' maps may be, in meters: the shift the coarse search covers.");
+  p.add("site.yaw_step_deg", reg.yaw_step_deg, "Headings tried, in degrees apart.");
+  p.add("site.prior_sigmas", reg.prior_sigmas,
+        "With GPS headings, search this many of their sigmas either side...");
+  p.add("site.min_yaw_window_deg", reg.min_yaw_window_deg,
+        "... and at least this many degrees.");
+  p.add("site.icp_min_height", reg.icp_min_height,
+        "Fine fit: only voxels at least this high over the terrain take part, in meters (flat "
+        "ground lines up at any shift).");
+  p.add("site.icp_start_distance", reg.icp_start_distance,
+        "Fine fit: points paired up to this far apart at first, in meters...");
+  p.add("site.icp_end_distance", reg.icp_end_distance, "... shrinking to this.");
+  p.add("site.icp_rounds", reg.icp_rounds, "Rounds of the fine fit.");
+  p.add("site.icp_thin", reg.icp_thin,
+        "The fine fit keeps one voxel per cell this size, in meters (faster).");
+  p.add("site.max_icp_points", reg.max_icp_points, "Points of the new walk the fine fit uses.");
+  p.add("site.coarse_candidates", reg.coarse_candidates,
+        "The best this many headings of the coarse search go on to the fine fit, which picks "
+        "among them...");
+  p.add("site.candidate_separation_deg", reg.candidate_separation_deg,
+        "... at least this many degrees apart.");
+  p.add("site.min_rival_ratio", reg.min_rival_ratio,
+        "The fit must line up this many times as many points as its best rival (another "
+        "heading or place; each weighed by agreement with the GPS heading, when used), or the "
+        "walk isn't added (ambiguous).");
+  p.add("site.min_overlap", reg.min_overlap,
+        "Share of the new walk that must lie within 1 m of the site's map.");
+  p.add("site.min_inliers", reg.min_inliers,
+        "Share of that overlap that must lie within 0.3 m once aligned.");
+
   p.section("layers", "Diagnostic: where a second surface sits over the first (ghosts).");
   p.add("layers.min_gap_voxels", c.layers.min_gap_voxels,
         "Runs of voxels separated by fewer empty voxels than this count as one surface.");

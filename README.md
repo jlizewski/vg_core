@@ -278,30 +278,6 @@ what single-frame labels get wrong, and stages ask the map by class.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
 
-### Terrain
-
-`ground.asc` is the ground where it was seen, patched in between. The
-`terrain` stage fits a smooth contour to it (`terrain.asc`, nodes every
-`terrain.node_spacing`, 0.5 m) and adds a second kind of evidence: the walk.
-The phone is carried at a steady height (on a measured walk, 1.56 m over the
-seen ground, +-18 cm), so the camera's path less that height is the ground
-underfoot. One point is rough, but many pin the ground down where it's hidden
-(overgrowth) and show up "ground" that is really foliage:
-
-- The phone's height is solved for (`terrain.path.phone_height: auto`), from
-  where the path crosses seen ground.
-- The fit starts from the walk, then brings in the seen ground with robust
-  weights: ground well above the fit (`terrain.above_scale`) counts for little
-  where the walk disagrees with it. A node's area of seen ground counts as one
-  observation, so a patch of foliage can't outvote the walk by its size.
-- `features.asc` is `surface.asc` less the terrain: what stands on the land.
-- The manifest records the phone height and how many ground cells were
-  discounted (most of them near plants).
-
-`vg path stats garden/` shows how the walk relates to the ground: how steady the
-phone's height is, whether it reads lower near plants, and the longest stretches
-walked without seen ground underfoot.
-
 To check a labeled recording:
 
 ```sh
@@ -433,6 +409,76 @@ target_link_libraries(my_app PRIVATE vg_core::vg_core)
 Tests are off by default when vg_core is not the top-level project
 (`-DVG_CORE_BUILD_TESTS=ON` to force them).
 
+### Terrain
+
+`ground.asc` is the ground where it was seen, patched in between. The
+`terrain` stage fits a smooth contour to it (`terrain.asc`, nodes every
+`terrain.node_spacing`, 0.5 m) and adds a second kind of evidence: the walk.
+The phone is carried at a steady height (on a measured walk, 1.56 m over the
+seen ground, +-18 cm), so the camera's path less that height is the ground
+underfoot. One point is rough, but many pin the ground down where it's hidden
+(overgrowth) and show up "ground" that is really foliage:
+
+- The phone's height is solved for (`terrain.path.phone_height: auto`), from
+  where the path crosses seen ground.
+- The fit starts from the walk, then brings in the seen ground with robust
+  weights: ground well above the fit (`terrain.above_scale`) counts for little
+  where the walk disagrees with it. A node's area of seen ground counts as one
+  observation, so a patch of foliage can't outvote the walk by its size.
+- `features.asc` is `surface.asc` less the terrain: what stands on the land.
+- The manifest records the phone height and how many ground cells were
+  discounted (most of them near plants).
+
+`vg path stats garden/` shows how the walk relates to the ground: how steady the
+phone's height is, whether it reads lower near plants, and the longest stretches
+walked without seen ground underfoot.
+
+## Sites: many walks of one place
+
+A walk is one map in its own frame (the tracker's origin and heading are
+arbitrary each time). A site lines up many walks of one place, so a garden can
+be mapped over days and seasons, all on the phone: no cloud service.
+
+```sh
+vg site add garden-site walk1/ walk2/ walk3/   # register each into the site, remake its maps
+vg site list garden-site                       # the visits, their alignment and fit
+vg site maps garden-site                       # remake current/ only
+```
+
+- The first walk added sets the site's frame. Each later one is registered
+  against every walk before it ([registration.hpp](include/vg_core/registration.hpp)):
+  a heading-and-shift search matching the outlines of what stands on the
+  terrain (`features.asc`), then a fine fit (ICP) on the voxels standing over
+  the terrain. Walks only differ by a turn about vertical and a shift, since
+  both know which way is down.
+- GPS (`site.use_gps`) narrows the heading search and breaks near ties
+  between alignments that fit alike, by how well each agrees with the walks'
+  GPS headings and positions; it never overrules a clearly better fit.
+  Without GPS all headings are searched (slower). Measured on real walks:
+  - Long walks of the yard line up with or without GPS, also a month apart.
+  - A sweep of one thing (a shed, the house, the canopy) fits several ways
+    from geometry alone, so without GPS it's refused as ambiguous; with GPS
+    they lined up.
+  - Each walk is matched against the whole site so far, so adding short walks
+    after a long one works best; a wrongly placed walk would mislead later
+    ones, which is why doubtful fits are refused rather than guessed.
+- A walk that doesn't line up convincingly isn't added, and the log says why:
+  too little overlap, too few points within 0.3 m (`site.min_inliers`), or
+  another alignment fitting nearly as well (`site.min_rival_ratio`). `--force`
+  adds it anyway.
+- Expect about half a meter and a couple of degrees of disagreement between
+  walks: each walk drifts a little on its own, which one rigid alignment can't
+  remove.
+- `site.csv` lists the visits, oldest first (by the date in the recording's
+  name), with each walk's transform into the site frame and its fit.
+  `current/` holds the site's maps in its frame, each cell from the latest
+  walk that saw it (`surface`, `ground`, `terrain`, `features`, `semantic`),
+  plus `visit.asc` (which walk each cell came from) and `changes.asc` (the
+  surface's change since the walk before: growth, and misalignment along
+  walls).
+- Settings: the `site` section of [config/mapping.yaml](config/mapping.yaml).
+  Packages missing their terrain maps get them first.
+
 ## Development tools (Python ≥ 3.10)
 
 ```sh
@@ -452,6 +498,7 @@ vg labels frames rec.mcap out/   # labels and depth over the camera image, per f
 vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
                     # (both need: pip install -e "tools[analysis]")
 vg path stats garden/            # the phone's height over the ground along the walk
+vg site add site/ walk/          # vg_site: line up walks of one place (see Sites)
 vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
                     # (needs: pip install -e "tools[models]", large: TensorFlow)
 vg segment rec.mcap out.mcap     # vg_segment: relabel a recording on this computer

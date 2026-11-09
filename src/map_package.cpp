@@ -323,6 +323,16 @@ const std::vector<Eigen::Vector3i>& MapPackage::occupied() {
   return *occupied_;
 }
 
+std::vector<Eigen::Vector3d> MapPackage::occupied_centers() {
+  const double voxel = map_.volume.config().voxel_size;
+  std::vector<Eigen::Vector3d> centers;
+  centers.reserve(occupied().size());
+  for (const auto& v : occupied()) {
+    centers.push_back((v.cast<double>().array() + 0.5) * voxel);
+  }
+  return centers;
+}
+
 void MapPackage::make_voxels() {
   const auto start = std::chrono::steady_clock::now();
   const double voxel_size = map_.volume.config().voxel_size;

@@ -5,7 +5,7 @@
 //
 // The YAML has a section per part of the pipeline: map, build (replaying the
 // recording into the 3D map), voxels (reading the 3D map out), maps, ground,
-// terrain, sun, layers; and the pipeline itself, the derived stages to run in order.
+// terrain, sun, layers, site; and the pipeline itself, the derived stages to run in order.
 // config/mapping.yaml in the repository lists every setting with its default
 // (`vg config defaults` writes it). A map package keeps the settings it was
 // made with in its config.yaml.
@@ -24,6 +24,7 @@
 #include "vg_core/ground_segmentation.hpp"
 #include "vg_core/io/map_build.hpp"
 #include "vg_core/map_package.hpp"
+#include "vg_core/registration.hpp"
 
 namespace vg::config {
 
@@ -63,6 +64,9 @@ struct MappingConfig {
   SunOptions sun;
   std::optional<int> year;
   LayersOptions layers;
+
+  // site: registering walks into a site (vg site, site.hpp).
+  RegistrationConfig registration;
 
   // Derived stages vg replay runs after the build, in order.
   std::vector<std::string> pipeline;

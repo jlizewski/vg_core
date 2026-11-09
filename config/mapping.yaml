@@ -229,6 +229,57 @@ semantics:
   # Votes a voxel's class needs to count; with fewer it's unknown.
   min_votes: 2
 
+# Registering walks into a site (vg site add): one place mapped over many
+# visits. The heading and shift are found from the maps; GPS only narrows the
+# search.
+site:
+  # Use the walks' GPS headings and positions, when they have them: they narrow
+  # the heading search and break near ties between fits.
+  use_gps: true
+  # 1-sigma error of a walk's GPS position relative to another walk's, in meters
+  # (walks on the same day share most of their GPS error).
+  gps_position_sigma: 3
+  # Grid of the coarse search, in meters.
+  raster: 0.3
+  # Features (features.asc) shorter than this are left out of the coarse search,
+  # in meters: low bumps match anywhere.
+  min_feature_height: 0.25
+  # How far apart two walks' maps may be, in meters: the shift the coarse search
+  # covers.
+  search_radius: 25
+  # Headings tried, in degrees apart.
+  yaw_step_deg: 2
+  # With GPS headings, search this many of their sigmas either side...
+  prior_sigmas: 3
+  # ... and at least this many degrees.
+  min_yaw_window_deg: 10
+  # Fine fit: only voxels at least this high over the terrain take part, in
+  # meters (flat ground lines up at any shift).
+  icp_min_height: 0.15
+  # Fine fit: points paired up to this far apart at first, in meters...
+  icp_start_distance: 1
+  # ... shrinking to this.
+  icp_end_distance: 0.15
+  # Rounds of the fine fit.
+  icp_rounds: 30
+  # The fine fit keeps one voxel per cell this size, in meters (faster).
+  icp_thin: 0.15
+  # Points of the new walk the fine fit uses.
+  max_icp_points: 60000
+  # The best this many headings of the coarse search go on to the fine fit,
+  # which picks among them...
+  coarse_candidates: 12
+  # ... at least this many degrees apart.
+  candidate_separation_deg: 5
+  # The fit must line up this many times as many points as its best rival
+  # (another heading or place; each weighed by agreement with the GPS heading,
+  # when used), or the walk isn't added (ambiguous).
+  min_rival_ratio: 1.3
+  # Share of the new walk that must lie within 1 m of the site's map.
+  min_overlap: 0.2
+  # Share of that overlap that must lie within 0.3 m once aligned.
+  min_inliers: 0.5
+
 # Diagnostic: where a second surface sits over the first (ghosts).
 layers:
   # Runs of voxels separated by fewer empty voxels than this count as one

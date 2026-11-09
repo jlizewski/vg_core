@@ -50,6 +50,8 @@ add_library(vg_core
   src/segmentation.cpp
   src/semantics.cpp
   src/solar.cpp
+  src/registration.cpp
+  src/site.cpp
   src/sun_map.cpp
   src/terrain.cpp
   src/tsdf_volume.cpp

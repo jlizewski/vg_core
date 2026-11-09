@@ -148,6 +148,9 @@ class MapPackage {
   void set_min_label_votes(int votes) { min_label_votes_ = votes; }
   static constexpr double kDefaultMinBlobVolume = 0.01;
 
+  // Centers of the occupied voxels (specks left out), in meters.
+  std::vector<Eigen::Vector3d> occupied_centers();
+
   // voxels.ply: the occupied voxels, for viewing; and labels.ply, colored by
   // semantic class, when the map has label votes.
   void make_voxels();

@@ -26,7 +26,9 @@ add_executable(vg_core_tests
   label_consistency_test.cpp
   map_package_test.cpp
   pose_jumps_test.cpp
+  registration_test.cpp
   segmentation_test.cpp
+  site_test.cpp
   solar_test.cpp
   sun_map_test.cpp
   terrain_test.cpp
