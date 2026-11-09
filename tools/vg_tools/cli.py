@@ -16,6 +16,7 @@ Run from anywhere inside the repository, e.g.:
     vg labels compare a.mcap b.mcap        # how two labelings of a recording differ
     vg models export NAME model.tflite     # a segmentation model as ONNX, for vg segment
     vg segment rec.mcap out.mcap           # relabel a recording on this computer
+    vg path stats garden/                  # the phone's height over the ground along the walk
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 # Commands implemented here; a C++ app can't take one of these names.
 BUILTINS = (
     "configure", "build", "test", "format", "schemas", "heatmap", "preview", "labels", "models",
+    "path",
 )
 
 
@@ -201,6 +203,17 @@ def cmd_labels_frames(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_path_stats(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import path
+
+    try:
+        print(path.format_path_stats(path.path_stats(args.package)))
+    except (OSError, ValueError, KeyError) as e:
+        print(f"vg: {e}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def add_app_parsers(sub: argparse._SubParsersAction, app_list: Sequence[apps.App]) -> None:
     """List the C++ apps in --help. main() runs them before argparse sees their
     arguments, so these parsers are only for help (and `vg mcap` alone)."""
@@ -306,6 +319,16 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
                    help="the .tflite model (omit for a model with a Hugging Face source)")
     p.add_argument("--out", type=Path, help="output (default: models/NAME.onnx in vg_core)")
     p.set_defaults(func=cmd_models_export)
+
+    path_parser = sub.add_parser("path", help="the walk in a map package")
+    path_sub = path_parser.add_subparsers(dest="path_command", required=True)
+    p = path_sub.add_parser(
+        "stats",
+        help="the phone's height over the ground along the walk: how steady, lower near plants "
+        "(foliage taken for ground), stretches without seen ground underfoot",
+    )
+    p.add_argument("package", type=Path, help="map package directory (after the ground stage)")
+    p.set_defaults(func=cmd_path_stats)
 
     add_app_parsers(sub, apps.discover(root or repo_root()))
     return parser

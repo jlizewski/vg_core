@@ -29,6 +29,7 @@ add_executable(vg_core_tests
   segmentation_test.cpp
   solar_test.cpp
   sun_map_test.cpp
+  terrain_test.cpp
   tsdf_volume_test.cpp
   version_test.cpp
   volume_io_test.cpp

@@ -10,6 +10,8 @@
 //   surface.asc     top surface height per cell (m)        <- surface stage
 //   ground.asc      bare ground height per cell (m)        <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
+//   terrain.asc     smooth contour of the ground (m)       <- terrain stage
+//   features.asc    surface height above the terrain (m)   <- terrain stage
 //   sun_hours.asc   hours of direct sun per cell           <- sun stage
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
 //   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
@@ -21,7 +23,8 @@
 // vg::io::build_map_package), and each derived map is a stage that reads only
 // map.vgm and the files of the stages before it, so any stage can be re-run
 // with new settings without replaying the recording. The sun stage reads
-// ground.asc, so re-run it after the ground stage to pick up a new ground.
+// ground.asc, so re-run it after the ground stage to pick up a new ground; the
+// terrain stage reads ground.asc, surface.asc and trajectory.csv.
 
 #include <Eigen/Core>
 #include <filesystem>
@@ -32,6 +35,7 @@
 #include <vector>
 
 #include "vg_core/ground_segmentation.hpp"
+#include "vg_core/terrain.hpp"
 #include "vg_core/volume_io.hpp"
 
 namespace vg {
@@ -43,6 +47,8 @@ inline constexpr const char* kSurface = "surface.asc";
 inline constexpr const char* kGround = "ground.asc";
 inline constexpr const char* kGroundPatched = "ground_patched.asc";
 inline constexpr const char* kObjects = "objects.ply";
+inline constexpr const char* kTerrain = "terrain.asc";
+inline constexpr const char* kFeatures = "features.asc";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
 inline constexpr const char* kLayers = "layers.asc";
@@ -81,6 +87,10 @@ struct GroundOptions {
   // config.cell_size is replaced by cell_size, or the package's if unset.
   GroundConfig config;
   std::optional<double> cell_size;
+};
+
+struct TerrainOptions {
+  TerrainConfig config;
 };
 
 struct SunOptions {
@@ -152,6 +162,12 @@ class MapPackage {
 
   // ground.asc and objects.ply: see segment_ground().
   void make_ground(const GroundOptions& options = {});
+
+  // terrain.asc: a smooth contour of the ground fitted to ground.asc's seen
+  // cells and the walked path (trajectory.csv), see fit_terrain(); and
+  // features.asc: surface.asc above it, when there is one. Returns false,
+  // writing nothing, if there is no ground map (run the ground stage first).
+  bool make_terrain(const TerrainOptions& options = {});
 
   // sun_hours.asc and sun_energy.asc over ground.asc. Returns false, writing
   // nothing, if the package has no ground map or its location is unknown (no

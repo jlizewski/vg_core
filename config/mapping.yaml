@@ -9,8 +9,8 @@
 # adding a setting.
 
 # Derived stages vg replay runs after building the 3D map, in order (and vg
-# map's `all`). Stages: voxels, surface, ground, sun, semantic, layers.
-pipeline: [voxels, surface, ground, sun, semantic]
+# map's `all`). Stages: voxels, surface, ground, terrain, sun, semantic, layers.
+pipeline: [voxels, surface, ground, terrain, sun, semantic]
 
 # The map package as a whole.
 map:
@@ -160,6 +160,50 @@ ground:
     # ... and it rises no more steeply than this (rise over run) toward the
     # nearest ground: a floor labeled ground up on a porch isn't ground.
     rescue_max_slope: 0.25
+
+# A smooth contour of the ground (terrain.asc), fitted to the seen ground and
+# the walked path: the phone's height over the ground is steady enough to find
+# the ground where it's hidden (overgrowth) and to show up foliage taken for
+# ground. features.asc is the surface above it.
+terrain:
+  # Distance between the terrain's nodes, in meters: the finest detail it
+  # follows.
+  node_spacing: 0.5
+  # How much the terrain may bend: the height a node may sit off the line
+  # through its neighbors, in meters. Smaller is smoother.
+  bend: 0.05
+  # Spread of the seen ground about the terrain over a node's area (its cells
+  # count as one observation), in meters. Smaller trusts the seen ground more
+  # against the path.
+  ground_sigma: 0.05
+  # Seen ground this far above the fit counts half, and less the higher it is
+  # (foliage taken for ground), in meters.
+  above_scale: 0.1
+  # ... and this far below it (dips are more likely real), in meters.
+  below_scale: 0.3
+  # Rounds of robust reweighting.
+  iterations: 8
+  # Map the terrain only this far from evidence (seen ground or the path), in
+  # meters.
+  reach: 2
+  path:
+    # Use the walked path (trajectory.csv) as evidence of the ground underfoot.
+    enabled: true
+    # The phone's height above the ground while walking, in meters. auto: solved
+    # for, from where the path crosses seen ground.
+    phone_height: auto
+    # Phone height used when it can't be solved for (no seen ground under the
+    # path), in meters.
+    default_phone_height: 1.5
+    # Spread of one path point's height above the ground, in meters (about 0.18
+    # on a measured walk).
+    sigma: 0.18
+    # A path point this far off the fit counts half (the phone raised to look at
+    # something), in meters.
+    scale: 0.3
+    # Take path points this far apart along the walk, in meters, so standing
+    # still isn't many points.
+    spacing: 0.25
 
 # Hours of direct sun and clear-sky energy per ground cell over a year.
 sun:

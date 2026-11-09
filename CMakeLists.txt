@@ -51,6 +51,7 @@ add_library(vg_core
   src/semantics.cpp
   src/solar.cpp
   src/sun_map.cpp
+  src/terrain.cpp
   src/tsdf_volume.cpp
   src/voxel_cleanup.cpp
   src/voxel_map_io.cpp

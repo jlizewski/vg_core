@@ -39,7 +39,7 @@ MappingConfig::MappingConfig() {
   tsdf.pixel_stride = 2;
   tsdf.threads = 0;
   build.builder.drop_non_keyframes = true;
-  pipeline = {"voxels", "surface", "ground", "sun", "semantic"};
+  pipeline = {"voxels", "surface", "ground", "terrain", "sun", "semantic"};
   drop_classes = {"dynamic", "sky"};
   not_ground_classes = {"plant", "tree", "structure", "dynamic"};
 }
@@ -115,7 +115,7 @@ ParamSet bind(MappingConfig& c) {
 
   p.add("pipeline", c.pipeline,
         "Derived stages vg replay runs after building the 3D map, in order (and vg map's "
-        "`all`). Stages: voxels, surface, ground, sun, semantic, layers.",
+        "`all`). Stages: voxels, surface, ground, terrain, sun, semantic, layers.",
         "--pipeline");
 
   p.section("map", "The map package as a whole.");
@@ -270,6 +270,50 @@ ParamSet bind(MappingConfig& c) {
         "... and it rises no more steeply than this (rise over run) toward the nearest ground: "
         "a floor labeled ground up on a porch isn't ground.");
 
+  p.section("terrain",
+            "A smooth contour of the ground (terrain.asc), fitted to the seen ground and the "
+            "walked path: the phone's height over the ground is steady enough to find the ground "
+            "where it's hidden (overgrowth) and to show up foliage taken for ground. "
+            "features.asc is the surface above it.");
+  TerrainConfig& terrain = c.terrain.config;
+  p.add("terrain.node_spacing", terrain.node_spacing,
+        "Distance between the terrain's nodes, in meters: the finest detail it follows.",
+        "--terrain-spacing");
+  p.add("terrain.bend", terrain.bend,
+        "How much the terrain may bend: the height a node may sit off the line through its "
+        "neighbors, in meters. Smaller is smoother.",
+        "--terrain-bend");
+  p.add("terrain.ground_sigma", terrain.ground_sigma,
+        "Spread of the seen ground about the terrain over a node's area (its cells count as "
+        "one observation), in meters. Smaller trusts the seen ground more against the path.");
+  p.add("terrain.above_scale", terrain.above_scale,
+        "Seen ground this far above the fit counts half, and less the higher it is (foliage "
+        "taken for ground), in meters.");
+  p.add("terrain.below_scale", terrain.below_scale,
+        "... and this far below it (dips are more likely real), in meters.");
+  p.add("terrain.iterations", terrain.iterations, "Rounds of robust reweighting.");
+  p.add("terrain.reach", terrain.reach,
+        "Map the terrain only this far from evidence (seen ground or the path), in meters.");
+  p.add("terrain.path.enabled", terrain.use_path,
+        "Use the walked path (trajectory.csv) as evidence of the ground underfoot.",
+        "--terrain-path");
+  p.add("terrain.path.phone_height", terrain.phone_height,
+        "The phone's height above the ground while walking, in meters. auto: solved for, from "
+        "where the path crosses seen ground.",
+        "--phone-height");
+  p.add("terrain.path.default_phone_height", terrain.default_phone_height,
+        "Phone height used when it can't be solved for (no seen ground under the path), in "
+        "meters.");
+  p.add("terrain.path.sigma", terrain.path_sigma,
+        "Spread of one path point's height above the ground, in meters (about 0.18 on a "
+        "measured walk).");
+  p.add("terrain.path.scale", terrain.path_scale,
+        "A path point this far off the fit counts half (the phone raised to look at "
+        "something), in meters.");
+  p.add("terrain.path.spacing", terrain.path_spacing,
+        "Take path points this far apart along the walk, in meters, so standing still isn't "
+        "many points.");
+
   p.section("sun", "Hours of direct sun and clear-sky energy per ground cell over a year.");
   p.add("sun.year", c.year, "Year to simulate. auto: the current one.", "--year");
   p.add("sun.step_minutes", c.sun.step_minutes, "Minutes between sun positions.", "--sun-step");
@@ -330,6 +374,8 @@ bool run_stages(MapPackage& package, const MappingConfig& config,
       package.make_surface(config.surface_options());
     } else if (stage == "ground") {
       package.make_ground(config.ground_options());
+    } else if (stage == "terrain") {
+      package.make_terrain(config.terrain_options());
     } else if (stage == "sun") {
       all_ran = package.make_sun(config.sun_options()) && all_ran;
     } else if (stage == "semantic") {

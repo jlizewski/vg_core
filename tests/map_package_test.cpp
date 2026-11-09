@@ -132,6 +132,36 @@ TEST_F(MapPackageTest, RerunsOneStageFromTheSavedMap) {
   EXPECT_NE(manifest.find("\"max_hole_area_m2\": 0,"), std::string::npos) << manifest;
 }
 
+TEST_F(MapPackageTest, TerrainFromTheGroundAndTheWalk) {
+  vg::MapPackage package(dir_, log_);
+  EXPECT_FALSE(package.make_terrain());  // No ground yet.
+  package.make_surface();
+  package.make_ground();
+  {
+    // A walk around the bed with the phone 1.5 m over the ground (z = 0).
+    std::ofstream path(dir_ / file::kTrajectory);
+    path << "t,x,y,z\n";
+    for (int i = 0; i <= 40; ++i) {
+      path << i * 0.1 << ',' << -0.5 + i * 0.05 << ",0.6,1.5\n";
+    }
+  }
+  ASSERT_TRUE(package.make_terrain());
+
+  const auto terrain = vg::load_height_map(dir_ / file::kTerrain);
+  const auto features = vg::load_height_map(dir_ / file::kFeatures);
+  const auto value = [](const vg::HeightMap& map, double x, double y) {
+    return map.at(static_cast<int>(std::floor((x - map.origin.x()) / map.cell_size)),
+                  static_cast<int>(std::floor((y - map.origin.y()) / map.cell_size)));
+  };
+  EXPECT_NEAR(value(terrain, 0.5, 0.0), 0.0, 0.05);
+  // The bed stands about 0.3 m over the terrain.
+  EXPECT_NEAR(value(features, 0.5, 0.0), 0.3, 0.1);
+  const std::string manifest = read_file(dir_ / file::kManifest);
+  EXPECT_NE(manifest.find("\"terrain\": {"), std::string::npos) << manifest;
+  EXPECT_NE(manifest.find("\"phone_height_solved\": true"), std::string::npos) << manifest;
+  EXPECT_NE(manifest.find("\"name\": \"features.asc\""), std::string::npos) << manifest;
+}
+
 TEST_F(MapPackageTest, SunNeedsALocationAndGround) {
   vg::MapPackage package(dir_, log_);
   EXPECT_FALSE(package.make_sun(quick_sun()));  // No ground yet.

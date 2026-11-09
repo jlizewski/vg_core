@@ -30,9 +30,28 @@ class Grid:
     cellsize: float
     # Top row first, as in the file. None where there is no data.
     rows: list[list[float | None]]
+    # Lower left corner of the grid, in the map frame (meters).
+    xllcorner: float = 0.0
+    yllcorner: float = 0.0
 
     def values(self) -> list[float]:
         return [v for row in self.rows for v in row if v is not None]
+
+    def cell_of(self, x: float, y: float) -> tuple[int, int] | None:
+        """(row, column) of the cell holding map point (x, y), or None outside."""
+        c = int((x - self.xllcorner) // self.cellsize)
+        r = self.nrows - 1 - int((y - self.yllcorner) // self.cellsize)
+        return (r, c) if 0 <= r < self.nrows and 0 <= c < self.ncols else None
+
+    def at(self, x: float, y: float) -> float | None:
+        """The value at map point (x, y): None outside the grid or with no data."""
+        cell = self.cell_of(x, y)
+        return None if cell is None else self.rows[cell[0]][cell[1]]
+
+    def center(self, r: int, c: int) -> tuple[float, float]:
+        """Map point at the center of cell (row, column)."""
+        return (self.xllcorner + (c + 0.5) * self.cellsize,
+                self.yllcorner + (self.nrows - 1 - r + 0.5) * self.cellsize)
 
 
 def read_ascii_grid(path: Path) -> Grid:
@@ -60,7 +79,8 @@ def read_ascii_grid(path: Path) -> Grid:
             v = float(data[r * ncols + c])
             row.append(None if v != v or (nodata is not None and v == nodata) else v)
         rows.append(row)
-    return Grid(ncols, nrows, cellsize, rows)
+    return Grid(ncols, nrows, cellsize, rows, header.get("xllcorner", 0.0),
+                header.get("yllcorner", 0.0))
 
 
 def color(t: float) -> tuple[int, int, int]:

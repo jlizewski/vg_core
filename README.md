@@ -153,6 +153,8 @@ garden/
   ground.asc       height of the bare ground per cell, holes under objects patched (m)
   ground_patched.asc  1 where ground.asc was patched rather than seen (diagnostic)
   objects.ply      everything on or over the ground
+  terrain.asc      smooth contour of the ground, from the seen ground and the walk (m)
+  features.asc     height of the surface above the terrain: beds, mounds, plants (m)
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
   labels.ply       voxels colored by semantic class (when the recording has labels)
@@ -174,8 +176,9 @@ vg map garden/ all --cell 0.1                # every 2D map at 10 cm
 ```
 
 The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`),
-`sun`, which reads `ground.asc`, so re-run `sun` after `ground`, and the
-diagnostic `layers`. In code they're `vg::MapPackage`
+`terrain` (reads `ground.asc`, `surface.asc` and `trajectory.csv`), `sun`,
+which reads `ground.asc`, so re-run `sun` after `ground`, and the diagnostic
+`layers`. In code they're `vg::MapPackage`
 ([map_package.hpp](include/vg_core/map_package.hpp)), and the build stage is
 `vg::io::build_map_package()`.
 
@@ -192,7 +195,7 @@ build:
     max_depth: 3.0
 ground:
   max_slope: 0.6
-pipeline: [voxels, surface, ground, sun, layers]
+pipeline: [voxels, surface, ground, terrain, sun, layers]
 ```
 
 ```sh
@@ -274,6 +277,30 @@ what single-frame labels get wrong, and stages ask the map by class.
   obstacle.
 
 Recordings without labels map as before, with the `semantic` stage skipped.
+
+### Terrain
+
+`ground.asc` is the ground where it was seen, patched in between. The
+`terrain` stage fits a smooth contour to it (`terrain.asc`, nodes every
+`terrain.node_spacing`, 0.5 m) and adds a second kind of evidence: the walk.
+The phone is carried at a steady height (on a measured walk, 1.56 m over the
+seen ground, +-18 cm), so the camera's path less that height is the ground
+underfoot. One point is rough, but many pin the ground down where it's hidden
+(overgrowth) and show up "ground" that is really foliage:
+
+- The phone's height is solved for (`terrain.path.phone_height: auto`), from
+  where the path crosses seen ground.
+- The fit starts from the walk, then brings in the seen ground with robust
+  weights: ground well above the fit (`terrain.above_scale`) counts for little
+  where the walk disagrees with it. A node's area of seen ground counts as one
+  observation, so a patch of foliage can't outvote the walk by its size.
+- `features.asc` is `surface.asc` less the terrain: what stands on the land.
+- The manifest records the phone height and how many ground cells were
+  discounted (most of them near plants).
+
+`vg path stats garden/` shows how the walk relates to the ground: how steady the
+phone's height is, whether it reads lower near plants, and the longest stretches
+walked without seen ground underfoot.
 
 To check a labeled recording:
 
@@ -424,6 +451,7 @@ vg labels perf rec.labels.csv    # the phone's segmentation speed and heat
 vg labels frames rec.mcap out/   # labels and depth over the camera image, per frame
 vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
                     # (both need: pip install -e "tools[analysis]")
+vg path stats garden/            # the phone's height over the ground along the walk
 vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
                     # (needs: pip install -e "tools[models]", large: TensorFlow)
 vg segment rec.mcap out.mcap     # vg_segment: relabel a recording on this computer
