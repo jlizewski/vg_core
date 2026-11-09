@@ -306,6 +306,8 @@ class mapping, and the results compared without walking the yard again:
 
 ```sh
 vg models export deeplabv3_mnv2_ade20k deeplabv3_mnv2_ade20k.tflite   # once: models/*.onnx
+vg models export segformer_b0_ade20k        # from its PyTorch weights on Hugging Face
+vg segment rec.mcap rec.segformer.mcap --model segformer_b0_ade20k
 vg segment rec.mcap rec.desktop.mcap        # the same recording, relabeled here
 vg labels compare rec.mcap rec.desktop.mcap # agreement, per-class IoU, confusion
 vg replay rec.desktop.mcap pkg/             # and what the labels do to the maps

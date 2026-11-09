@@ -166,15 +166,24 @@ def cmd_models_export(args: argparse.Namespace, root: Path) -> int:
 
     out = args.out or root / "models" / f"{args.name}.onnx"
     try:
-        fixed, agreement = models.export_tflite(args.tflite, out)
+        if args.tflite is not None:
+            fixed, agreement = models.export_tflite(args.tflite, out)
+            source = "the .tflite"
+            if fixed:
+                print(f"fixed {len(fixed)} fractional resizes: {', '.join(fixed)}")
+        elif args.name in models.HUGGING_FACE:
+            agreement = models.export_huggingface(args.name, out)
+            source = "PyTorch"
+        else:
+            known = ", ".join(sorted(models.HUGGING_FACE))
+            print(f"vg: give {args.name}'s .tflite (Hugging Face models: {known})", file=sys.stderr)
+            return 2
     except (OSError, ValueError) as e:
         print(f"vg: {e}", file=sys.stderr)
         return 1
-    if fixed:
-        print(f"fixed {len(fixed)} fractional resizes: {', '.join(fixed)}")
-    print(f"{out}: picks the .tflite's class on {100 * agreement:.2f}% of output cells")
+    print(f"{out}: picks {source}'s class on {100 * agreement:.2f}% of output cells")
     if agreement < 0.99:
-        print("vg: the ONNX model disagrees with the .tflite; don't use it", file=sys.stderr)
+        print(f"vg: the ONNX model disagrees with {source}; don't use it", file=sys.stderr)
         return 1
     return 0
 
@@ -293,7 +302,8 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
         '(needs pip install -e "tools[models]")',
     )
     p.add_argument("name", help="model name, e.g. deeplabv3_mnv2_ade20k")
-    p.add_argument("tflite", type=Path, help="the .tflite model")
+    p.add_argument("tflite", type=Path, nargs="?",
+                   help="the .tflite model (omit for a model with a Hugging Face source)")
     p.add_argument("--out", type=Path, help="output (default: models/NAME.onnx in vg_core)")
     p.set_defaults(func=cmd_models_export)
 

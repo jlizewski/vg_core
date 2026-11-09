@@ -1,10 +1,13 @@
 """Converting segmentation models to ONNX for the desktop (vg segment).
 
     vg models export deeplabv3_mnv2_ade20k path/to/deeplabv3_mnv2_ade20k.tflite
+    vg models export segformer_b0_ade20k       # from Hugging Face, no .tflite needed
 
-writes models/deeplabv3_mnv2_ade20k.onnx in vg_core, where vg segment looks
-by default. The phone keeps running the .tflite; the ONNX copy is checked to
-give the same classes on random input before it's written.
+write models/<name>.onnx in vg_core, where vg segment looks by default. A
+.tflite (the phone's model) is converted and checked to give the same classes
+on random input; a model with a Hugging Face source (HUGGING_FACE) is exported
+from its original PyTorch weights and checked against them. Either way the
+ONNX model takes and gives channels-last tensors, as the phone's do.
 
 Needs the `models` extra, which is large (TensorFlow): pip install -e "tools[models]".
 
@@ -87,6 +90,49 @@ def check_against_tflite(tflite: Path, onnx_path: Path, trials: int = 2) -> floa
         b = session.run(None, {name: x})[0]
         agree.append(float((a.argmax(-1) == b.argmax(-1)).mean()))
     return min(agree)
+
+
+# Models exported from their original PyTorch weights on Hugging Face: name to
+# (model id, input size).
+HUGGING_FACE = {
+    "segformer_b0_ade20k": ("nvidia/segformer-b0-finetuned-ade-512-512", 512),
+}
+
+
+def export_huggingface(name: str, out: Path, opset: int = 17) -> float:
+    """Export a Hugging Face segmentation model to ONNX at out, channels last
+    in and out (1 x H x W x 3 normalized image, 1 x h x w x classes logits).
+    Returns the share of output cells where it picks PyTorch's class."""
+    np = _require("numpy")
+    ort = _require("onnxruntime")
+    torch = _require("torch")
+    transformers = _require("transformers")
+
+    model_id, size = HUGGING_FACE[name]
+    model = transformers.AutoModelForSemanticSegmentation.from_pretrained(model_id).eval()
+
+    class ChannelsLast(torch.nn.Module):
+        def __init__(self, inner):
+            super().__init__()
+            self.inner = inner
+
+        def forward(self, image):
+            logits = self.inner(pixel_values=image.permute(0, 3, 1, 2)).logits
+            return logits.permute(0, 2, 3, 1)
+
+    wrapped = ChannelsLast(model).eval()
+    example = torch.zeros(1, size, size, 3)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    torch.onnx.export(wrapped, (example,), str(out), input_names=["image"],
+                      output_names=["scores"], opset_version=opset, dynamo=False)
+
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(1, size, size, 3)).astype(np.float32)
+    with torch.no_grad():
+        expected = wrapped(torch.from_numpy(x)).numpy()
+    session = ort.InferenceSession(str(out), providers=["CPUExecutionProvider"])
+    got = session.run(None, {"image": x})[0]
+    return float((expected.argmax(-1) == got.argmax(-1)).mean())
 
 
 def export_tflite(tflite: Path, out: Path, opset: int = 17) -> tuple[list[str], float]:
