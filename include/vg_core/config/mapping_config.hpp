@@ -5,7 +5,7 @@
 //
 // The YAML has a section per part of the pipeline: map, build (replaying the
 // recording into the 3D map), voxels (reading the 3D map out), maps, ground,
-// terrain, sun, layers, site; and the pipeline itself, the derived stages to run in order.
+// terrain, sky, sun, layers, site; and the pipeline itself, the derived stages to run in order.
 // config/mapping.yaml in the repository lists every setting with its default
 // (`vg config defaults` writes it). A map package keeps the settings it was
 // made with in its config.yaml.
@@ -29,8 +29,8 @@
 namespace vg::config {
 
 // The derived stages run_stages() knows, in their natural order.
-inline const std::vector<std::string> kStages = {"voxels", "surface",  "ground", "terrain",
-                                                 "sun",    "semantic", "layers"};
+inline const std::vector<std::string> kStages = {"voxels", "surface", "ground",   "terrain",
+                                                 "sky",    "sun",     "semantic", "layers"};
 
 struct MappingConfig {
   // The defaults, as vg replay uses them.
@@ -61,6 +61,9 @@ struct MappingConfig {
   std::optional<double> cell_size;
   GroundConfig ground;
   TerrainOptions terrain;
+  // build.sky.blocked_beyond: auto is build.depth.max_depth.
+  std::optional<double> sky_blocked_beyond;
+  SkyOptions sky;
   SunOptions sun;
   std::optional<int> year;
   LayersOptions layers;
@@ -80,6 +83,7 @@ struct MappingConfig {
   SurfaceOptions surface_options() const;
   GroundOptions ground_options() const;
   TerrainOptions terrain_options() const { return terrain; }
+  SkyOptions sky_options() const { return sky; }
   SunOptions sun_options() const;
   LayersOptions layers_options() const;
 };

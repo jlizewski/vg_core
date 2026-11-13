@@ -14,6 +14,7 @@
 
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/map_package.hpp"
+#include "vg_core/voxel_map_io.hpp"
 
 namespace vg {
 namespace {
@@ -346,7 +347,7 @@ RegistrationResult Site::add(const std::filesystem::path& package, const Registr
   return result;
 }
 
-void Site::make_maps(std::ostream& log) const {
+void Site::make_maps(std::ostream& log, const CanopyConfig& canopy_config) const {
   const auto start = std::chrono::steady_clock::now();
   const auto out = dir_ / site_file::kCurrent;
   std::filesystem::create_directories(out);
@@ -371,6 +372,27 @@ void Site::make_maps(std::ostream& log) const {
     }
     save_height_map(visit, out / site_file::kVisit);
     save_height_map(changes, out / site_file::kChanges);
+  }
+  // The canopy: every visit's sky evidence in the site frame, together.
+  std::optional<SkyEvidence> sky;
+  for (const SiteVisit& v : visits_) {
+    const auto path = package_dir(v) / package_file::kSky;
+    if (std::filesystem::is_regular_file(path)) {
+      const SkyEvidence evidence = load_sky(path);
+      if (!sky) {
+        sky.emplace(evidence.cell_size());
+      }
+      sky->add(evidence, v.site_from_map);
+    }
+  }
+  if (sky) {
+    const Canopy canopy =
+        make_canopy(*sky, load_height_map(out / package_file::kTerrain), canopy_config);
+    save_height_map(canopy.bottom, out / package_file::kCanopy);
+    save_height_map(canopy.top, out / package_file::kCanopyTop);
+    save_voxels_ply(canopy.cells, canopy.cell_size, out / package_file::kCanopyCells);
+    log << "site: canopy " << canopy.cells.size() << " cells of " << canopy.observed
+        << " judged, from " << sky->frames() << " labeled frames" << std::endl;
   }
   log << "site: " << visits_.size() << " visits -> " << site_file::kCurrent << "/ ("
       << seconds_since(start) << " s)" << std::endl;

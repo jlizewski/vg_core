@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
       const vg::RegistrationResult result = site.add(package, config.registration, std::cout, force);
       all_added = all_added && (result.accepted || force);
     }
-    site.make_maps(std::cout);
+    site.make_maps(std::cout, config.sky.config);
     list(site);
     return all_added ? 0 : 1;
   } catch (const std::exception& e) {

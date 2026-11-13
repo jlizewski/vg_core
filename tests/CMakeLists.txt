@@ -29,6 +29,7 @@ add_executable(vg_core_tests
   registration_test.cpp
   segmentation_test.cpp
   site_test.cpp
+  sky_test.cpp
   solar_test.cpp
   sun_map_test.cpp
   terrain_test.cpp

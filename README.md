@@ -155,6 +155,9 @@ garden/
   objects.ply      everything on or over the ground
   terrain.asc      smooth contour of the ground, from the seen ground and the walk (m)
   features.asc     height of the surface above the terrain: beds, mounds, plants (m)
+  sky.vgs          where sky was seen, and blocked beyond depth (when labeled)
+  canopy.asc       lowest canopy over the terrain, beyond depth's reach (m)
+  canopy_top.asc   highest canopy (an upper bound), canopy.ply its cells
   sun_hours.asc    hours of direct sun per ground cell over the year
   sun_energy.asc   clear-sky direct solar energy per ground cell (kWh/m^2)
   labels.ply       voxels colored by semantic class (when the recording has labels)
@@ -176,7 +179,8 @@ vg map garden/ all --cell 0.1                # every 2D map at 10 cm
 ```
 
 The stages are `voxels`, `surface`, `ground` (also writes `objects.ply`),
-`terrain` (reads `ground.asc`, `surface.asc` and `trajectory.csv`), `sun`,
+`terrain` (reads `ground.asc`, `surface.asc` and `trajectory.csv`), `sky`
+(reads `sky.vgs` and `terrain.asc`), `sun`,
 which reads `ground.asc`, so re-run `sun` after `ground`, and the diagnostic
 `layers`. In code they're `vg::MapPackage`
 ([map_package.hpp](include/vg_core/map_package.hpp)), and the build stage is
@@ -432,6 +436,29 @@ underfoot. One point is rough, but many pin the ground down where it's hidden
 `vg path stats garden/` shows how the walk relates to the ground: how steady the
 phone's height is, whether it reads lower near plants, and the longest stretches
 walked without seen ground underfoot.
+
+### Sky and canopy
+
+Phone depth reaches about 3.5 m, but a canopy or roofline 6-15 m up still
+shades the garden. The semantic labels see it: a pixel labeled sky is a ray
+open all the way up, and a pixel looking up that isn't sky, with no depth
+reading near by, is blocked somewhere beyond depth's reach
+([sky.hpp](include/vg_core/sky.hpp)).
+
+- While replaying, the build follows those rays through coarse cells
+  (`build.sky.cell_size`, 0.5 m) and counts, per cell, the frames that saw sky
+  through it and those that saw it blocked: `sky.vgs`.
+- The `sky` stage reads it out: a cell many frames saw blocked
+  (`sky.min_blocked`) and (almost) none saw sky through (`sky.max_clear`) is
+  canopy. `canopy.asc` is its lowest height over the terrain per cell,
+  `canopy.ply` its cells. Seen from below, what's above the canopy is never
+  seen, so `canopy_top.asc` is only an upper bound.
+- One walk sees little of the sky (even on a "look up" walk, 13% of frames
+  were above level). A site combines every walk's evidence in its frame
+  (`current/canopy.*`): on seven walks of one yard, the canopy from six
+  predicted which of the seventh's upward pixels were sky better than a
+  horizon profile, most under the canopy (sky IoU 30% -> 53%) and near the
+  house (62% -> 74%).
 
 ## Sites: many walks of one place
 

@@ -36,7 +36,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 15> kFiles = {{
+constexpr std::array<FileInfo, 19> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -48,6 +48,13 @@ constexpr std::array<FileInfo, 15> kFiles = {{
      "Smooth contour of the ground, fitted to the seen ground and the walked path"},
     {package_file::kFeatures, "m",
      "Height of the surface above the terrain: beds, mounds, plants, structures"},
+    {package_file::kSky, "",
+     "Sky evidence: per coarse cell, frames seeing sky through it and seeing it blocked beyond "
+     "depth's reach"},
+    {package_file::kCanopy, "m",
+     "Height of the lowest canopy (overhead, beyond depth's reach) over the terrain"},
+    {package_file::kCanopyTop, "m", "Height of the highest canopy over the terrain"},
+    {package_file::kCanopyCells, "m", "The canopy's coarse cells as a mesh of cubes"},
     {package_file::kSunHours, "h", "Hours of direct sun per ground cell over the year"},
     {package_file::kSunEnergy, "kWh/m^2",
      "Clear-sky direct solar energy per ground cell over the year"},
@@ -64,9 +71,9 @@ constexpr std::array<FileInfo, 15> kFiles = {{
 }};
 
 // Stages in the order they run, for the manifest.
-constexpr std::array<const char*, 9> kStages = {"build",  "voxels",  "labels",
-                                                "surface", "ground", "terrain",
-                                                "sun",    "semantic", "layers"};
+constexpr std::array<const char*, 10> kStages = {"build",   "voxels", "labels",  "surface",
+                                                 "ground",  "terrain", "sky",    "sun",
+                                                 "semantic", "layers"};
 
 std::string json_number(double value) {
   if (!std::isfinite(value)) {
@@ -647,6 +654,36 @@ bool MapPackage::make_terrain(const TerrainOptions& options) {
        << " above it) -> " << package_file::kTerrain
        << (feature_cells > 0 ? std::string(", ") + package_file::kFeatures : std::string())
        << " (" << seconds_since(start) << " s)" << std::endl;
+  return true;
+}
+
+bool MapPackage::make_sky(const SkyOptions& options) {
+  if (!std::filesystem::is_regular_file(path(package_file::kSky)) ||
+      !std::filesystem::is_regular_file(path(package_file::kTerrain))) {
+    log_ << "sky: skipped, needs " << package_file::kSky << " (a recording with labels) and "
+         << package_file::kTerrain << " (the terrain stage)" << std::endl;
+    return false;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  const SkyEvidence sky = load_sky(path(package_file::kSky));
+  const Canopy canopy =
+      make_canopy(sky, load_height_map(path(package_file::kTerrain)), options.config);
+  save_height_map(canopy.bottom, path(package_file::kCanopy));
+  save_height_map(canopy.top, path(package_file::kCanopyTop));
+  save_voxels_ply(canopy.cells, canopy.cell_size, path(package_file::kCanopyCells));
+  update_manifest(dir_, map_.metadata, map_.volume.config().voxel_size, "sky",
+                  StageSettings()
+                      .add("min_blocked", options.config.min_blocked)
+                      .add("max_clear", options.config.max_clear)
+                      .add("min_height_m", options.config.min_height)
+                      .add("cell_size_m", canopy.cell_size)
+                      .add("frames", sky.frames())
+                      .add("cells_observed", canopy.observed)
+                      .add("canopy_cells", canopy.cells.size()));
+  log_ << "sky: " << canopy.cells.size() << " canopy cells of " << canopy.observed
+       << " judged, from " << sky.frames() << " labeled frames -> " << package_file::kCanopy
+       << ", " << package_file::kCanopyTop << ", " << package_file::kCanopyCells << " ("
+       << seconds_since(start) << " s)" << std::endl;
   return true;
 }
 

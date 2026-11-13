@@ -52,6 +52,7 @@ add_library(vg_core
   src/solar.cpp
   src/registration.cpp
   src/site.cpp
+  src/sky.cpp
   src/sun_map.cpp
   src/terrain.cpp
   src/tsdf_volume.cpp

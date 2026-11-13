@@ -9,8 +9,9 @@
 # adding a setting.
 
 # Derived stages vg replay runs after building the 3D map, in order (and vg
-# map's `all`). Stages: voxels, surface, ground, terrain, sun, semantic, layers.
-pipeline: [voxels, surface, ground, terrain, sun, semantic]
+# map's `all`). Stages: voxels, surface, ground, terrain, sky, sun, semantic,
+# layers.
+pipeline: [voxels, surface, ground, terrain, sky, sun, semantic]
 
 # The map package as a whole.
 map:
@@ -103,6 +104,23 @@ build:
     # land (a label quality measure needing no ground truth; in the log and
     # manifest).
     consistency: true
+  # Gathering sky evidence (sky.vgs) for the canopy beyond depth's reach, from
+  # the semantic labels: pixels labeled sky are open rays; others looking up
+  # with no depth near by are blocked somewhere beyond it.
+  sky:
+    # Gather sky evidence (needs labels).
+    enabled: true
+    # Edge of its coarse cells, in meters.
+    cell_size: 0.5
+    # Rays are followed this far, in meters.
+    range: 40
+    # A pixel that isn't sky with no depth reading this near is blocked beyond
+    # it, in meters. auto: build.depth.max_depth.
+    blocked_beyond: auto
+    # Every Nth label pixel in each direction casts a ray.
+    pixel_stride: 3
+    # Blocked rays count only looking at least this many degrees up.
+    min_elevation_deg: 3
 
 # Reading the 3D map out for every derived map. vg map can re-tune these without
 # a rebuild.
@@ -204,6 +222,18 @@ terrain:
     # Take path points this far apart along the walk, in meters, so standing
     # still isn't many points.
     spacing: 0.25
+
+# The canopy beyond depth's reach (canopy.asc, canopy_top.asc, canopy.ply), from
+# the sky evidence: cells many frames saw blocked and (almost) none saw sky
+# through.
+sky:
+  # A cell is canopy if at least this many frames saw it blocked...
+  min_blocked: 20
+  # ... and at most this many saw sky through it (labels err sometimes).
+  max_clear: 1
+  # Canopy lower than this over the terrain is left out, in meters (the depth
+  # maps it).
+  min_height: 2
 
 # Hours of direct sun and clear-sky energy per ground cell over a year.
 sun:

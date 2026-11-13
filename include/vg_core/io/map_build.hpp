@@ -10,6 +10,7 @@
 
 #include "vg_core/map_builder.hpp"
 #include "vg_core/pose_jumps.hpp"
+#include "vg_core/sky.hpp"
 
 namespace vg::io {
 
@@ -40,6 +41,9 @@ struct BuildOptions {
   // map's votes (label_consistency.hpp), with this many votes needed.
   bool label_consistency = true;
   int label_consistency_votes = 2;
+  // With semantic labels: gather sky evidence (sky.hpp) into sky.vgs, for the
+  // canopy beyond depth's reach.
+  SkyConfig sky;
 };
 
 // What the build settled on where options left it to the data.
@@ -52,7 +56,8 @@ struct BuildSummary {
 };
 
 // Rebuilds the 3D map from the session and starts a map package in dir with
-// it (map.vgm, trajectory.csv, manifest.json), replacing any package there.
+// it (map.vgm, trajectory.csv, sky.vgs when labeled, manifest.json), replacing any
+// package there.
 // The map is placed on the Earth from the session's GPS fixes and poses, when
 // it has GPS. Progress and timings go to log. Throws std::runtime_error if
 // the session can't be read or the package can't be written.

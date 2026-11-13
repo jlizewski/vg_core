@@ -13,6 +13,8 @@
 //     visit.asc         which visit (1 = the first) each cell came from
 //     changes.asc       surface height change at each cell since the visit
 //                       before the latest one that saw it (growth, m)
+//     canopy.asc, canopy_top.asc, canopy.ply
+//                       the canopy from every visit's sky evidence together
 //
 // The first visit defines the site frame. Each later one is registered
 // against all the visits before it, combined. Packages stay where they are;
@@ -25,6 +27,7 @@
 #include <vector>
 
 #include "vg_core/registration.hpp"
+#include "vg_core/sky.hpp"
 
 namespace vg {
 
@@ -62,8 +65,9 @@ class Site {
   RegistrationResult add(const std::filesystem::path& package, const RegistrationConfig& config,
                          std::ostream& log, bool force = false);
 
-  // Writes current/: the latest visit's view of each cell, and the changes.
-  void make_maps(std::ostream& log) const;
+  // Writes current/: the latest visit's view of each cell, the changes, and
+  // the canopy from all visits' sky evidence.
+  void make_maps(std::ostream& log, const CanopyConfig& canopy = {}) const;
 
   // The package directory of a visit, resolved against the site.
   std::filesystem::path package_dir(const SiteVisit& visit) const;

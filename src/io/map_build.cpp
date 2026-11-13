@@ -46,6 +46,7 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   // Classes the map drops can't agree with it; leave them out.
   LabelConsistency consistency(4, config.tsdf.max_depth, config.tsdf.drop_labels);
   Eigen::Isometry3d body_from_camera = Eigen::Isometry3d::Identity();
+  SkyEvidence sky(options.sky.cell_size);
   const std::size_t messages = play(
       reader,
       [&](const SessionMessage& m) {
@@ -86,6 +87,9 @@ BuildSummary build_map_package(const std::filesystem::path& session,
           ++depth_frames;
           if (options.label_consistency && !poses.empty()) {
             consistency.add(depth->frame, poses.back().world_from_frame * body_from_camera);
+          }
+          if (options.sky.enabled && !poses.empty()) {
+            sky.add(depth->frame, poses.back().world_from_frame * body_from_camera, options.sky);
           }
           frames_with_confidence += depth->frame.confidence.empty() ? 0 : 1;
           // When watching it replay live, refresh the live height map every 10
@@ -186,6 +190,7 @@ BuildSummary build_map_package(const std::filesystem::path& session,
       .add("from_s", options.from)
       .add("to_s", options.to)
       .add("seconds", seconds);
+  settings.add("sky_frames", sky.frames()).add("sky_cells", sky.size());
   if (agreement.total() > 0) {
     settings.add("label_consistency", agreement.overall());
     for (std::size_t c = 1; c < kSemanticClasses; ++c) {
@@ -204,6 +209,11 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   path_file << "t,x,y,z\n";
   for (const auto& [t, position] : camera_path) {
     path_file << t << ',' << position.x() << ',' << position.y() << ',' << position.z() << '\n';
+  }
+  if (!sky.empty()) {
+    save_sky(sky, dir / package_file::kSky);
+    log << "sky: evidence from " << sky.frames() << " labeled frames in " << sky.size()
+        << " cells of " << sky.cell_size() << " m -> " << package_file::kSky << '\n';
   }
   return {min_weight, confidence, agreement.overall()};
 }

@@ -12,6 +12,10 @@
 //   objects.ply     everything on or over the ground       <- ground stage
 //   terrain.asc     smooth contour of the ground (m)       <- terrain stage
 //   features.asc    surface height above the terrain (m)   <- terrain stage
+//   sky.vgs         where sky was seen, and blocked beyond depth  <- build, when labeled
+//   canopy.asc      lowest canopy over the terrain (m)     <- sky stage
+//   canopy_top.asc  highest canopy over the terrain (m)    <- sky stage
+//   canopy.ply      the canopy's coarse cells              <- sky stage
 //   sun_hours.asc   hours of direct sun per cell           <- sun stage
 //   sun_energy.asc  clear-sky direct energy (kWh/m^2)      <- sun stage
 //   layers.asc      gap to a second surface above (m)      <- layers stage (diagnostic)
@@ -35,6 +39,7 @@
 #include <vector>
 
 #include "vg_core/ground_segmentation.hpp"
+#include "vg_core/sky.hpp"
 #include "vg_core/terrain.hpp"
 #include "vg_core/volume_io.hpp"
 
@@ -49,6 +54,10 @@ inline constexpr const char* kGroundPatched = "ground_patched.asc";
 inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kTerrain = "terrain.asc";
 inline constexpr const char* kFeatures = "features.asc";
+inline constexpr const char* kSky = "sky.vgs";
+inline constexpr const char* kCanopy = "canopy.asc";
+inline constexpr const char* kCanopyTop = "canopy_top.asc";
+inline constexpr const char* kCanopyCells = "canopy.ply";
 inline constexpr const char* kSunHours = "sun_hours.asc";
 inline constexpr const char* kSunEnergy = "sun_energy.asc";
 inline constexpr const char* kLayers = "layers.asc";
@@ -91,6 +100,10 @@ struct GroundOptions {
 
 struct TerrainOptions {
   TerrainConfig config;
+};
+
+struct SkyOptions {
+  CanopyConfig config;
 };
 
 struct SunOptions {
@@ -171,6 +184,12 @@ class MapPackage {
   // features.asc: surface.asc above it, when there is one. Returns false,
   // writing nothing, if there is no ground map (run the ground stage first).
   bool make_terrain(const TerrainOptions& options = {});
+
+  // canopy.asc, canopy_top.asc and canopy.ply: the canopy beyond depth's
+  // reach, from sky.vgs over terrain.asc (see make_canopy()). Returns false,
+  // writing nothing, without them (a recording without labels, or no terrain
+  // stage yet).
+  bool make_sky(const SkyOptions& options = {});
 
   // sun_hours.asc and sun_energy.asc over ground.asc. Returns false, writing
   // nothing, if the package has no ground map or its location is unknown (no

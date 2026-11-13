@@ -39,7 +39,7 @@ MappingConfig::MappingConfig() {
   tsdf.pixel_stride = 2;
   tsdf.threads = 0;
   build.builder.drop_non_keyframes = true;
-  pipeline = {"voxels", "surface", "ground", "terrain", "sun", "semantic"};
+  pipeline = {"voxels", "surface", "ground", "terrain", "sky", "sun", "semantic"};
   drop_classes = {"dynamic", "sky"};
   not_ground_classes = {"plant", "tree", "structure", "dynamic"};
 }
@@ -79,6 +79,7 @@ io::BuildOptions MappingConfig::build_options() const {
   options.builder.tsdf.truncation_distance =
       truncation.value_or(3.0 * options.builder.tsdf.voxel_size);
   options.to = to.value_or(std::numeric_limits<double>::infinity());
+  options.sky.blocked_beyond = sky_blocked_beyond.value_or(options.builder.tsdf.max_depth);
   return options;
 }
 
@@ -115,7 +116,7 @@ ParamSet bind(MappingConfig& c) {
 
   p.add("pipeline", c.pipeline,
         "Derived stages vg replay runs after building the 3D map, in order (and vg map's "
-        "`all`). Stages: voxels, surface, ground, terrain, sun, semantic, layers.",
+        "`all`). Stages: voxels, surface, ground, terrain, sky, sun, semantic, layers.",
         "--pipeline");
 
   p.section("map", "The map package as a whole.");
@@ -210,6 +211,21 @@ ParamSet bind(MappingConfig& c) {
   p.add("build.semantics.consistency", c.build.label_consistency,
         "Score how well each frame's labels agree with the map's votes where they land (a "
         "label quality measure needing no ground truth; in the log and manifest).");
+
+  p.section("build.sky",
+            "Gathering sky evidence (sky.vgs) for the canopy beyond depth's reach, from the "
+            "semantic labels: pixels labeled sky are open rays; others looking up with no depth "
+            "near by are blocked somewhere beyond it.");
+  p.add("build.sky.enabled", c.build.sky.enabled, "Gather sky evidence (needs labels).");
+  p.add("build.sky.cell_size", c.build.sky.cell_size, "Edge of its coarse cells, in meters.");
+  p.add("build.sky.range", c.build.sky.range, "Rays are followed this far, in meters.");
+  p.add("build.sky.blocked_beyond", c.sky_blocked_beyond,
+        "A pixel that isn't sky with no depth reading this near is blocked beyond it, in "
+        "meters. auto: build.depth.max_depth.");
+  p.add("build.sky.pixel_stride", c.build.sky.pixel_stride,
+        "Every Nth label pixel in each direction casts a ray.");
+  p.add("build.sky.min_elevation_deg", c.build.sky.min_elevation_deg,
+        "Blocked rays count only looking at least this many degrees up.");
 
   p.section("voxels",
             "Reading the 3D map out for every derived map. vg map can re-tune these without a "
@@ -313,6 +329,16 @@ ParamSet bind(MappingConfig& c) {
   p.add("terrain.path.spacing", terrain.path_spacing,
         "Take path points this far apart along the walk, in meters, so standing still isn't "
         "many points.");
+
+  p.section("sky",
+            "The canopy beyond depth's reach (canopy.asc, canopy_top.asc, canopy.ply), from the "
+            "sky evidence: cells many frames saw blocked and (almost) none saw sky through.");
+  p.add("sky.min_blocked", c.sky.config.min_blocked,
+        "A cell is canopy if at least this many frames saw it blocked...");
+  p.add("sky.max_clear", c.sky.config.max_clear,
+        "... and at most this many saw sky through it (labels err sometimes).");
+  p.add("sky.min_height", c.sky.config.min_height,
+        "Canopy lower than this over the terrain is left out, in meters (the depth maps it).");
 
   p.section("sun", "Hours of direct sun and clear-sky energy per ground cell over a year.");
   p.add("sun.year", c.year, "Year to simulate. auto: the current one.", "--year");
@@ -421,6 +447,9 @@ bool run_stages(MapPackage& package, const MappingConfig& config,
       package.make_ground(config.ground_options());
     } else if (stage == "terrain") {
       package.make_terrain(config.terrain_options());
+    } else if (stage == "sky") {
+      // Skipped without labels (an older recording); not a failure.
+      package.make_sky(config.sky_options());
     } else if (stage == "sun") {
       all_ran = package.make_sun(config.sun_options()) && all_ran;
     } else if (stage == "semantic") {
