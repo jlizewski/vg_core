@@ -17,6 +17,7 @@ Run from anywhere inside the repository, e.g.:
     vg models export NAME model.tflite     # a segmentation model as ONNX, for vg segment
     vg segment rec.mcap out.mcap           # relabel a recording on this computer
     vg path stats garden/                  # the phone's height over the ground along the walk
+    vg dashboard --recordings DIR --sites DIR   # browser dashboard: replays, sites, maps
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ CPP_SUFFIXES = {".h", ".hpp", ".cpp", ".cc"}
 # Commands implemented here; a C++ app can't take one of these names.
 BUILTINS = (
     "configure", "build", "test", "format", "schemas", "heatmap", "preview", "labels", "models",
-    "path",
+    "path", "dashboard",
 )
 
 
@@ -214,6 +215,18 @@ def cmd_path_stats(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def cmd_dashboard(args: argparse.Namespace, root: Path) -> int:
+    from vg_tools import dashboard
+
+    ws = dashboard.Workspace(args.recordings.resolve(), args.sites.resolve(), root)
+    if not ws.recordings.is_dir():
+        print(f"vg: no recordings folder {ws.recordings}", file=sys.stderr)
+        return 1
+    ws.sites.mkdir(parents=True, exist_ok=True)
+    dashboard.serve(ws, args.port, not args.no_browser)
+    return 0
+
+
 def add_app_parsers(sub: argparse._SubParsersAction, app_list: Sequence[apps.App]) -> None:
     """List the C++ apps in --help. main() runs them before argparse sees their
     arguments, so these parsers are only for help (and `vg mcap` alone)."""
@@ -319,6 +332,19 @@ def build_parser(root: Path | None = None) -> argparse.ArgumentParser:
                    help="the .tflite model (omit for a model with a Hugging Face source)")
     p.add_argument("--out", type=Path, help="output (default: models/NAME.onnx in vg_core)")
     p.set_defaults(func=cmd_models_export)
+
+    p = sub.add_parser(
+        "dashboard",
+        help="a local browser dashboard: replay recordings into sites, line walks up, look at "
+        "the maps",
+    )
+    p.add_argument("--recordings", type=Path, required=True,
+                   help="folder of recordings (*.vgcap.mcap)")
+    p.add_argument("--sites", type=Path, required=True,
+                   help="folder of sites (created if needed); each holds walks/ and its maps")
+    p.add_argument("--port", type=int, default=8765, help="port on 127.0.0.1 (default 8765)")
+    p.add_argument("--no-browser", action="store_true", help="don't open a browser")
+    p.set_defaults(func=cmd_dashboard)
 
     path_parser = sub.add_parser("path", help="the walk in a map package")
     path_sub = path_parser.add_subparsers(dest="path_command", required=True)

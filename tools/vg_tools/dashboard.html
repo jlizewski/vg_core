@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vg dashboard</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6b66; --line: #e2e1dc;
+    --accent: #2f6f4e; --accent-ink: #ffffff; --warn: #a3541a; --bad: #b3261e; --good: #2f6f4e;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9b9a93; --line: #33332f;
+            --accent: #6fbf8f; --accent-ink: #10130f; --warn: #e0a060; --bad: #f08a80; --good: #6fbf8f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 20px;
+           border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .ws { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button { background: none; border: 1px solid transparent; color: var(--muted);
+               padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+  nav button.on { color: var(--ink); border-color: var(--line); background: var(--bg); }
+  main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+  section { display: none; } section.on { display: block; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 10px; }
+  .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.num { font-variant-numeric: tabular-nums; text-align: right; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 10px; background: var(--bg);
+         border: 1px solid var(--line); font-size: 12px; }
+  .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  button.act { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 6px;
+               padding: 5px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  button.plain { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+                 border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  input, select { font: inherit; font-size: 13px; padding: 4px 6px; border-radius: 6px;
+                  border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .grid2 { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
+  @media (max-width: 1000px) { .grid2 { grid-template-columns: 1fr; } }
+  #mapwrap { position: relative; background: var(--bg); border: 1px solid var(--line);
+             border-radius: 8px; overflow: hidden; }
+  #map { display: block; width: 100%; image-rendering: pixelated; cursor: crosshair; }
+  #readout { font-family: var(--mono); font-size: 12px; color: var(--muted); min-height: 18px; }
+  #legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 12px; margin-top: 8px; }
+  #legend span i { display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+                   margin-right: 4px; vertical-align: -1px; }
+  #scale { height: 10px; border-radius: 3px; margin-top: 6px; }
+  pre.log { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px;
+            font: 12px/1.4 var(--mono); max-height: 60vh; overflow: auto; white-space: pre-wrap; margin: 0; }
+  .jobs-mini { font-size: 12px; color: var(--muted); }
+  .empty { color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<header>
+  <h1>vg dashboard</h1>
+  <span class="ws" id="ws"></span>
+  <nav>
+    <button data-tab="recordings" class="on">Recordings</button>
+    <button data-tab="sites">Sites</button>
+    <button data-tab="jobs">Jobs <span id="jobcount"></span></button>
+  </nav>
+</header>
+<main>
+  <section id="recordings" class="on">
+    <div class="card">
+      <h2>Recordings</h2>
+      <p class="hint">Each recording becomes a walk (a map package) in a site. The tag comes from a renamed video beside it
+        (e.g. <code>shed-recording-….mp4</code>).</p>
+      <div class="row" style="margin-bottom:10px">
+        Replay into site <select id="replaySite"></select>
+        <span class="hint" style="margin:0">— new site: <input id="newSite" placeholder="backyard" size="12">
+        <button class="plain" id="createSite">Create</button></span>
+      </div>
+      <table id="recTable"></table>
+    </div>
+  </section>
+
+  <section id="sites">
+    <div class="card">
+      <div class="row"><h2 style="margin:0">Site</h2> <select id="siteSel"></select>
+        <button class="plain" id="remake">Remake maps</button></div>
+    </div>
+    <div class="grid2">
+      <div>
+        <div class="card">
+          <div class="row" style="justify-content:space-between">
+            <div class="row">Map <select id="layerSel"></select>
+              <label><input type="checkbox" id="showPaths" checked> walk paths</label></div>
+            <div class="row">range <input id="vmin" size="6" placeholder="auto"> – <input id="vmax" size="6" placeholder="auto"></div>
+          </div>
+          <div id="mapwrap" style="margin-top:10px"><canvas id="map"></canvas></div>
+          <div id="readout"></div>
+          <div id="scale"></div>
+          <div id="legend"></div>
+        </div>
+      </div>
+      <div>
+        <div class="card">
+          <h2>Visits</h2>
+          <p class="hint">Walks lined up in the site's frame, oldest first. Fit: share of the walk's overlap within 30 cm
+            once aligned; rival: how much better it fits than the next-best alignment.</p>
+          <table id="visitTable"></table>
+        </div>
+        <div class="card">
+          <h2>Walks not in the site</h2>
+          <p class="hint">Add the long walks first: each walk is matched against everything added before it.</p>
+          <div id="pending"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="jobs">
+    <div class="grid2">
+      <div class="card"><h2 id="logTitle">Log</h2><pre class="log" id="log">Pick a job.</pre></div>
+      <div class="card"><h2>Jobs</h2><p class="hint">Run one at a time, oldest first.</p><table id="jobTable"></table></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = null, grid = null, paths = [], logJob = null, logNext = 0;
+const PATH_COLORS = ["#4cc9f0", "#f72585", "#b5e48c", "#ffd166", "#06d6a0", "#ef476f", "#118ab2", "#ff9f1c", "#c77dff", "#e9ff70"];
+
+async function api(path, body) {
+  const res = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" },
+                                         body: JSON.stringify(body) } : {});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const pct = (v) => v == null ? "" : `${Math.round(v * 100)}%`;
+const when = (stamp) => stamp ? `${stamp.slice(0, 4)}-${stamp.slice(4, 6)}-${stamp.slice(6, 8)} ${stamp.slice(9, 11)}:${stamp.slice(11, 13)}` : "";
+
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
+  document.querySelectorAll("section").forEach((s) => s.classList.toggle("on", s.id === b.dataset.tab));
+  if (b.dataset.tab === "sites") drawMap();
+});
+
+async function refresh() {
+  state = await api("/api/state");
+  $("ws").textContent = `${state.workspace.recordings}  ·  sites: ${state.workspace.sites}`;
+  renderRecordings();
+  renderSites();
+  renderJobs();
+}
+
+// --- Recordings ---------------------------------------------------------------------------
+function renderRecordings() {
+  const sel = $("replaySite"), keep = sel.value;
+  sel.innerHTML = state.sites.map((s) => `<option>${esc(s.name)}</option>`).join("") || "<option value=''>(create a site)</option>";
+  if (keep) sel.value = keep;
+  const rows = state.recordings.map((r) => {
+    const walkName = (r.tag ? r.tag + "-" : "") + r.stamp;
+    return `<tr><td>${esc(when(r.stamp))}</td><td>${r.tag ? `<span class="tag">${esc(r.tag)}</span>` : ""}</td>
+      <td class="num">${r.size_mb} MB</td><td>${r.labels_csv ? "labels" : ""}</td>
+      <td>${r.walks.map(esc).join("<br>") || '<span class="empty">not replayed</span>'}</td>
+      <td class="row"><input size="16" value="${esc(walkName)}" data-walk="${esc(r.name)}">
+        <button class="act" data-replay="${esc(r.name)}">Replay</button>
+        <button class="plain" data-stats="${esc(r.name)}">Stats</button></td></tr>`;
+  });
+  $("recTable").innerHTML = `<tr><th>Recorded</th><th>Tag</th><th>Size</th><th></th><th>Walks</th><th>Replay as walk</th></tr>` +
+    (rows.join("") || `<tr><td colspan=6 class="empty">No *.vgcap.mcap in the recordings folder.</td></tr>`);
+  document.querySelectorAll("[data-replay]").forEach((b) => b.onclick = async () => {
+    const site = $("replaySite").value;
+    if (!site) return alert("Create a site first.");
+    const walk = document.querySelector(`[data-walk="${CSS.escape(b.dataset.replay)}"]`).value.trim();
+    await startJob("/api/replay", { recording: b.dataset.replay, site, walk });
+  });
+  document.querySelectorAll("[data-stats]").forEach((b) => b.onclick = () => startJob("/api/stats", { recording: b.dataset.stats }));
+}
+$("createSite").onclick = async () => {
+  const name = $("newSite").value.trim();
+  if (!name) return;
+  try { await api("/api/site/create", { site: name }); $("newSite").value = ""; await refresh(); $("replaySite").value = name; }
+  catch (e) { alert(e.message); }
+};
+
+// --- Sites --------------------------------------------------------------------------------
+function currentSite() { return state.sites.find((s) => s.name === $("siteSel").value); }
+
+function renderSites() {
+  const sel = $("siteSel"), keep = sel.value;
+  sel.innerHTML = state.sites.map((s) => `<option>${esc(s.name)}</option>`).join("");
+  if (keep && state.sites.some((s) => s.name === keep)) sel.value = keep;
+  const site = currentSite();
+  if (!site) { $("visitTable").innerHTML = `<tr><td class="empty">No sites yet.</td></tr>`; $("pending").innerHTML = ""; return; }
+
+  const walks = Object.fromEntries(site.walks.map((w) => [w.name, w]));
+  $("visitTable").innerHTML = `<tr><th>#</th><th>Walk</th><th>Turn</th><th>Fit</th><th>Rival</th></tr>` +
+    site.visits.map((v, i) => {
+      const fit = v.inliers_30cm, cls = fit == null ? "" : fit >= 0.65 ? "good" : fit >= 0.5 ? "warn" : "bad";
+      const w = walks[v.walk] || {};
+      return `<tr><td><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PATH_COLORS[i % PATH_COLORS.length]}"></i> ${i + 1}</td>
+        <td>${esc(v.walk)}<br><span class="hint">${esc(when(v.recorded))}${w.sky_frames ? ` · sky ${w.sky_frames} fr` : ""}${w.gps_bearing_sigma_deg != null ? ` · GPS ±${w.gps_bearing_sigma_deg.toFixed(1)}°` : ""}</span></td>
+        <td class="num">${v.yaw_deg.toFixed(1)}°</td>
+        <td class="num ${cls}">${fit == null ? "frame" : pct(fit)}</td>
+        <td class="num">${v.rival_ratio ? (v.rival_ratio > 99 ? ">99" : v.rival_ratio.toFixed(1)) + "×" : ""}</td></tr>`;
+    }).join("");
+
+  const inSite = new Set(site.visits.map((v) => v.walk));
+  const pending = site.walks.filter((w) => !inSite.has(w.name));
+  $("pending").innerHTML = pending.length ? pending.map((w) =>
+      `<label class="row"><input type="checkbox" data-add="${esc(w.name)}"> ${esc(w.name)}
+        <span class="hint" style="margin:0">${esc(when(w.stamp))}${w.label_consistency ? ` · labels ${pct(w.label_consistency)}` : ""}</span></label>`).join("") +
+      `<div class="row" style="margin-top:8px"><button class="act" id="addWalks">Add to site</button>
+        <label class="hint" style="margin:0"><input type="checkbox" id="force"> force (add even if it doesn't fit convincingly)</label></div>`
+    : `<span class="empty">Every walk is in the site.</span>`;
+  if ($("addWalks")) $("addWalks").onclick = () => {
+    const chosen = [...document.querySelectorAll("[data-add]:checked")].map((x) => x.dataset.add);
+    if (chosen.length) startJob("/api/site/add", { site: site.name, walks: chosen, force: $("force").checked });
+  };
+
+  // Layers: the site's current maps, then each walk's own.
+  const ls = $("layerSel"), keepLayer = ls.value;
+  ls.innerHTML = site.maps.map((m) => `<option value="|${esc(m)}">site · ${esc(m.replace(".asc", ""))}</option>`).join("") +
+    site.walks.map((w) => w.maps.map((m) => `<option value="${esc(w.name)}|${esc(m)}">${esc(w.name)} · ${esc(m.replace(".asc", ""))}</option>`).join("")).join("");
+  if ([...ls.options].some((o) => o.value === keepLayer)) ls.value = keepLayer;
+  else if ([...ls.options].some((o) => o.value === "|surface.asc")) ls.value = "|surface.asc";
+}
+
+$("siteSel").onchange = () => { renderSites(); loadMap(); };
+$("layerSel").onchange = loadMap;
+$("showPaths").onchange = drawMap;
+$("vmin").onchange = drawMap; $("vmax").onchange = drawMap;
+$("remake").onclick = () => currentSite() && startJob("/api/site/maps", { site: currentSite().name });
+
+async function loadMap() {
+  const site = currentSite();
+  const [walk, map] = ($("layerSel").value || "|").split("|");
+  if (!site || !map) { grid = null; drawMap(); return; }
+  try {
+    const q = new URLSearchParams({ site: site.name, map, ...(walk ? { walk } : {}) });
+    [grid, paths] = await Promise.all([api(`/api/grid?${q}`), walk ? Promise.resolve([]) : api(`/api/paths?site=${encodeURIComponent(site.name)}`)]);
+    grid.name = map; grid.walk = walk;
+  } catch (e) { grid = null; $("readout").textContent = e.message; }
+  drawMap();
+}
+
+function paletteColor(t) {
+  const stops = state.palette;
+  t = Math.min(1, Math.max(0, t));
+  for (let i = 1; i < stops.length; i++) {
+    if (t <= stops[i][0]) {
+      const [t0, c0] = stops[i - 1], [t1, c1] = stops[i], f = (t - t0) / (t1 - t0 || 1);
+      return c0.map((v, k) => Math.round(v + (c1[k] - v) * f));
+    }
+  }
+  return stops[stops.length - 1][1];
+}
+function divergingColor(t) {  // -1 blue, 0 pale, +1 red
+  t = Math.min(1, Math.max(-1, t));
+  const pale = [240, 240, 235], neg = [40, 90, 200], pos = [200, 50, 40], end = t < 0 ? neg : pos, f = Math.abs(t);
+  return pale.map((v, k) => Math.round(v + (end[k] - v) * f));
+}
+
+function drawMap() {
+  const canvas = $("map");
+  if (!grid || !state) { canvas.width = 1; canvas.height = 1; $("legend").innerHTML = ""; $("scale").style.background = "none"; return; }
+  const kind = grid.name === "semantic.asc" ? "classes" : grid.name === "visit.asc" ? "visits"
+             : grid.name === "changes.asc" ? "diverging" : "heat";
+  let lo = parseFloat($("vmin").value), hi = parseFloat($("vmax").value);
+  if (kind === "diverging") { const m = isNaN(hi) ? 0.5 : hi; lo = -m; hi = m; }
+  if (isNaN(lo)) lo = grid.min; if (isNaN(hi)) hi = grid.max;
+  const span = hi > lo ? hi - lo : 1;
+  const W = grid.ncols, H = grid.nrows, scale = Math.max(1, Math.floor(1200 / Math.max(W, H)));
+  canvas.width = W * scale; canvas.height = H * scale;
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) {
+    const v = grid.values[i];
+    if (v == null) continue;
+    let c;
+    if (kind === "classes") c = (state.classes[v] || state.classes[0]).color;
+    else if (kind === "visits") c = hexRgb(PATH_COLORS[(v - 1) % PATH_COLORS.length]);
+    else if (kind === "diverging") c = divergingColor(v / (hi || 1));
+    else c = paletteColor((v - lo) / span);
+    img.data.set([c[0], c[1], c[2], 255], i * 4);
+  }
+  const off = document.createElement("canvas"); off.width = W; off.height = H;
+  off.getContext("2d").putImageData(img, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(off, 0, 0, W * scale, H * scale);
+
+  if ($("showPaths").checked && !grid.walk) {
+    const site = currentSite();
+    const index = Object.fromEntries(site.visits.map((v, i) => [v.walk, i]));
+    ctx.lineWidth = Math.max(1.5, scale / 2);
+    for (const p of paths) {
+      ctx.strokeStyle = PATH_COLORS[(index[p.walk] ?? 0) % PATH_COLORS.length];
+      ctx.beginPath();
+      p.points.forEach(([x, y], k) => {
+        const px = (x - grid.xll) / grid.cell * scale, py = (H - (y - grid.yll) / grid.cell) * scale;
+        k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      });
+      ctx.stroke();
+    }
+  }
+  canvas.dataset.scale = scale;
+
+  // Legend.
+  if (kind === "classes") {
+    $("scale").style.background = "none";
+    $("legend").innerHTML = state.classes.slice(1).map((c) => `<span><i style="background:rgb(${c.color})"></i>${esc(c.name)}</span>`).join("");
+  } else if (kind === "visits") {
+    $("scale").style.background = "none";
+    $("legend").innerHTML = currentSite().visits.map((v, i) => `<span><i style="background:${PATH_COLORS[i % PATH_COLORS.length]}"></i>${i + 1} ${esc(v.walk)}</span>`).join("");
+  } else {
+    const stops = kind === "diverging" ? [[0, divergingColor(-1)], [0.5, divergingColor(0)], [1, divergingColor(1)]] : state.palette;
+    $("scale").style.background = `linear-gradient(90deg, ${stops.map(([t, c]) => `rgb(${c}) ${t * 100}%`).join(",")})`;
+    $("legend").innerHTML = `<span>${lo.toFixed(2)}</span><span style="margin-left:auto">${hi.toFixed(2)}</span>` +
+      (!grid.walk && $("showPaths").checked ? currentSite().visits.map((v, i) => `<span><i style="background:${PATH_COLORS[i % PATH_COLORS.length]}"></i>${esc(v.walk)}</span>`).join("") : "");
+  }
+}
+const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+
+$("map").onmousemove = (e) => {
+  if (!grid) return;
+  const r = e.target.getBoundingClientRect(), s = e.target.width / r.width, scale = +e.target.dataset.scale;
+  const c = Math.floor((e.clientX - r.left) * s / scale), row = Math.floor((e.clientY - r.top) * s / scale);
+  if (c < 0 || row < 0 || c >= grid.ncols || row >= grid.nrows) return;
+  const v = grid.values[row * grid.ncols + c];
+  const x = grid.xll + (c + 0.5) * grid.cell, y = grid.yll + (grid.nrows - row - 0.5) * grid.cell;
+  let text = v == null ? "no data" : v.toFixed(3);
+  if (v != null && grid.name === "semantic.asc") text = state.classes[v]?.name ?? v;
+  if (v != null && grid.name === "visit.asc") text = `${v} ${currentSite().visits[v - 1]?.walk ?? ""}`;
+  $("readout").textContent = `x ${x.toFixed(2)} m, y ${y.toFixed(2)} m: ${text}`;
+};
+
+// --- Jobs ---------------------------------------------------------------------------------
+function renderJobs() {
+  const running = state.jobs.filter((j) => j.state === "running" || j.state === "queued").length;
+  $("jobcount").textContent = running ? `(${running})` : "";
+  $("jobTable").innerHTML = `<tr><th>#</th><th>Job</th><th>State</th></tr>` + (state.jobs.map((j) =>
+    `<tr style="cursor:pointer" data-job="${j.id}"><td>${j.id}</td><td>${esc(j.title)}</td>
+      <td class="${j.state === "failed" ? "bad" : j.state === "done" ? "good" : "warn"}">${j.state}${j.ended && j.started ? ` · ${Math.round(j.ended - j.started)} s` : ""}</td></tr>`).join("")
+    || `<tr><td colspan=3 class="empty">No jobs yet.</td></tr>`);
+  document.querySelectorAll("[data-job]").forEach((r) => r.onclick = () => showLog(+r.dataset.job));
+}
+async function startJob(path, body) {
+  try {
+    const job = await api(path, body);
+    document.querySelector('nav button[data-tab="jobs"]').click();
+    showLog(job.id);
+    refresh();
+  } catch (e) { alert(e.message); }
+}
+function showLog(id) { logJob = id; logNext = 0; $("log").textContent = ""; pollLog(); }
+async function pollLog() {
+  if (logJob == null) return;
+  const job = await api(`/api/job?id=${logJob}&from=${logNext}`);
+  $("logTitle").textContent = `${job.title} — ${job.state}`;
+  if (job.lines.length) {
+    const pre = $("log"), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+    pre.textContent += job.lines.join("\n") + "\n";
+    if (atEnd) pre.scrollTop = pre.scrollHeight;
+  }
+  logNext = job.next;
+}
+
+let lastJobs = "";
+setInterval(async () => {
+  try {
+    const jobs = await api("/api/jobs");
+    const sig = JSON.stringify(jobs.map((j) => [j.id, j.state]));
+    if (sig !== lastJobs) {  // A job started or finished: the workspace may have changed.
+      const finished = lastJobs !== "";
+      lastJobs = sig;
+      await refresh();
+      if (finished) loadMap();
+    }
+    await pollLog();
+  } catch (e) { /* server stopped */ }
+}, 1500);
+
+refresh().then(loadMap);
+</script>
+</body>
+</html>

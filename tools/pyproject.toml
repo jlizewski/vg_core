@@ -24,6 +24,9 @@ vg = "vg_tools.cli:main"
 [tool.setuptools.packages.find]
 include = ["vg_tools*"]
 
+[tool.setuptools.package-data]
+vg_tools = ["dashboard.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

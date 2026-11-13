@@ -506,6 +506,23 @@ vg site maps garden-site                       # remake current/ only
 - Settings: the `site` section of [config/mapping.yaml](config/mapping.yaml).
   Packages missing their terrain maps get them first.
 
+### The dashboard
+
+`vg dashboard --recordings DIR --sites DIR` opens a page (on this computer
+only, http://127.0.0.1:8765) for the whole workflow, the way the app will run
+it: recordings -> walks -> a site -> its maps.
+
+- **Recordings**: each one with its tag (from a renamed video beside it,
+  `shed-recording-....mp4`) and the walks made from it; replay one into a
+  site as a walk, or get its stats.
+- **Sites**: the visits lined up in the site's frame with their fit, walks
+  not yet added (add them, long walks first), and any map of the site or of
+  one walk, with every walk's path over it and the value under the cursor.
+- **Jobs**: replays and site builds run one at a time, with their logs.
+
+A site is a folder under `--sites` with its walks in `walks/`, so the whole
+site can be moved or copied. It's pure Python, nothing to install.
+
 ## Development tools (Python ≥ 3.10)
 
 ```sh
@@ -526,6 +543,7 @@ vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
                     # (both need: pip install -e "tools[analysis]")
 vg path stats garden/            # the phone's height over the ground along the walk
 vg site add site/ walk/          # vg_site: line up walks of one place (see Sites)
+vg dashboard --recordings DIR --sites DIR  # browser dashboard (see Sites)
 vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
                     # (needs: pip install -e "tools[models]", large: TensorFlow)
 vg segment rec.mcap out.mcap     # vg_segment: relabel a recording on this computer
