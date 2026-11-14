@@ -20,7 +20,7 @@ on any platform.
 | `src/io/`, `include/vg_core/io/` | `vg_core_io`: capture session recording and playback (MCAP) |
 | `apps/` | Command-line apps (`vg_replay`, `vg_map`, `vg_mcap_repair`), run as `vg replay`, `vg map`, `vg mcap repair` |
 | `tools/` | Python development tools (`vg` CLI) |
-| `docs/` | Design docs, including the [capture format](docs/capture-format.md) |
+| `docs/` | [Documentation](docs/README.md): vision, architecture, how each pipeline stage works, file formats, designs, decisions, roadmap |
 | `schemas/` | Protobuf schemas for vg-specific capture messages |
 
 ## Building (C++17, CMake ≥ 3.20)
