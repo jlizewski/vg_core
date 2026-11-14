@@ -14,17 +14,15 @@
 // updated with what ran. map and build settings can't change here: they
 // need a rebuild with vg_replay.
 
-#include <algorithm>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
 #include <iostream>
-#include <map>
 #include <string>
 #include <vector>
 
+#include "vg_core/config/jobs.hpp"
 #include "vg_core/config/mapping_config.hpp"
-#include "vg_core/map_package.hpp"
 
 namespace {
 
@@ -55,52 +53,13 @@ int main(int argc, char** argv) {
   }
 
   try {
-    const auto saved = package_dir / vg::package_file::kConfig;
-    if (std::filesystem::exists(saved)) {
-      params.load_yaml_file(saved.string());
-    } else {
-      std::cout << "note: " << saved.string()
-                << " not found (an older package); starting from the defaults\n";
-    }
-    // map and build settings describe the saved 3D map; they can't change here.
-    std::map<std::string, std::string> built;
-    for (const std::string& path : params.paths()) {
-      if (vg::config::is_build_setting(path)) {
-        built[path] = params.get(path);
-      }
-    }
-    params.apply_args({args.begin() + static_cast<std::ptrdiff_t>(i), args.end()});
-    for (const auto& [path, value] : built) {
-      if (params.get(path) != value) {
-        throw vg::config::ConfigError(path + " is a build setting: rebuild with vg replay to "
-                                      "change it");
-      }
-    }
-    if (std::find(stages.begin(), stages.end(), "all") != stages.end()) {
-      stages = config.pipeline;
-    }
-    config.validate();
-    vg::config::check_stages(stages);
+    const bool all_ran = vg::config::rerun_stages(
+        package_dir, stages, {args.begin() + static_cast<std::ptrdiff_t>(i), args.end()},
+        std::cout);
+    return all_ran ? 0 : 1;
   } catch (const vg::config::ConfigError& e) {
     std::cerr << "vg_map: " << e.what() << "\n";
     return 2;
-  }
-  const auto wants = [&](const std::string& stage) {
-    return std::find(stages.begin(), stages.end(), stage) != stages.end();
-  };
-
-  try {
-    vg::MapPackage package(package_dir, std::cout);
-    config.year = config.sun_options().year;
-    const bool all_ran = vg::config::run_stages(package, config, stages);
-    if (wants("ground") && !wants("sun") &&
-        std::filesystem::exists(package.dir() / vg::package_file::kSunHours)) {
-      std::cout << "note: the sun maps were made over the previous ground; run the sun stage "
-                   "to update them\n";
-    }
-    vg::config::save_settings(params, package.dir() / vg::package_file::kConfig,
-                              vg::config::kPackageHeader);
-    return all_ran ? 0 : 1;
   } catch (const std::exception& e) {
     std::cerr << "vg_map: " << e.what() << "\n";
     return 1;

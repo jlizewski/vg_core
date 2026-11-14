@@ -20,6 +20,8 @@ New to the project? Read these in order:
    read them in.
 5. [Decisions](decisions.md): choices already made, and why.
 
+Building an app on vg_core? Read the [C API](c-api.md).
+
 ## How the mapping works
 
 The pipeline from sensor data to garden maps, one stage per page. Each page

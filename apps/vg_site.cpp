@@ -20,8 +20,8 @@
 #include <string>
 #include <vector>
 
+#include "vg_core/config/jobs.hpp"
 #include "vg_core/config/mapping_config.hpp"
-#include "vg_core/map_package.hpp"
 #include "vg_core/site.hpp"
 
 namespace {
@@ -34,31 +34,6 @@ int usage(const vg::config::ParamSet& params) {
                "       vg_site list <site_dir>\n"
             << params.flags_help();
   return 2;
-}
-
-// Runs the stages a package needs for registration that it hasn't run yet.
-void prepare(const std::filesystem::path& dir) {
-  std::vector<std::string> stages;
-  for (const auto& [file, stage] :
-       {std::pair{vg::package_file::kSurface, "surface"},
-        std::pair{vg::package_file::kGround, "ground"},
-        std::pair{vg::package_file::kTerrain, "terrain"}}) {
-    if (!stages.empty() || !std::filesystem::is_regular_file(dir / file)) {
-      stages.push_back(stage);  // And everything after it.
-    }
-  }
-  if (stages.empty()) {
-    return;
-  }
-  vg::config::MappingConfig config;
-  vg::config::ParamSet params = vg::config::bind(config);
-  if (std::filesystem::exists(dir / vg::package_file::kConfig)) {
-    params.load_yaml_file((dir / vg::package_file::kConfig).string());
-  }
-  vg::MapPackage package(dir, std::cout);
-  vg::config::run_stages(package, config, stages);
-  vg::config::save_settings(params, dir / vg::package_file::kConfig,
-                            vg::config::kPackageHeader);
 }
 
 void list(const vg::Site& site) {
@@ -110,28 +85,17 @@ int main(int argc, char** argv) {
     return usage(params);
   }
   try {
-    params.apply_args(settings);
-    config.validate();
+    bool all_added = true;
+    if (command == "add") {
+      all_added = vg::config::add_to_site(site_dir, packages, force, settings, std::cout);
+    } else if (command == "maps") {
+      vg::config::make_site_maps(site_dir, settings, std::cout);
+    }
+    list(vg::Site(site_dir));
+    return all_added ? 0 : 1;
   } catch (const vg::config::ConfigError& e) {
     std::cerr << "vg_site: " << e.what() << "\n";
     return 2;
-  }
-
-  try {
-    vg::Site site(site_dir);
-    if (command == "list") {
-      list(site);
-      return 0;
-    }
-    bool all_added = true;
-    for (const auto& package : packages) {
-      prepare(package);
-      const vg::RegistrationResult result = site.add(package, config.registration, std::cout, force);
-      all_added = all_added && (result.accepted || force);
-    }
-    site.make_maps(std::cout, config.sky.config);
-    list(site);
-    return all_added ? 0 : 1;
   } catch (const std::exception& e) {
     std::cerr << "vg_site: " << e.what() << "\n";
     return 1;

@@ -24,7 +24,8 @@ stands on it, the canopy and sun, and many walks combine into one site.
 | Sun over the site, with the canopy as occluder | ⬜ | Site-wide geo-reference from all walks' GPS |
 | Diffuse light (sky-view fraction) | ⬜ | Same rays as the sun map |
 | Run the pipeline on the phone after a walk | ⬜ | Today it runs on a PC |
-| C API for bindings | ⬜ | [D11](decisions.md#d11-a-c-api-for-the-app-bindings) |
+| C API for bindings | 🔨 | Version 1: recording, live map, grids, packages, sites, jobs ([c-api.md](c-api.md)). Next: segmentation callbacks, garden model, job progress and cancel. |
+| vg_core builds for iOS and Android from vg_flutter | ⬜ | CMake toolchains; static C API on iOS |
 | Commercially usable segmentation model | ⬜ | Licenses, yard accuracy, phone cost |
 
 ## M2. Plan and track the garden
@@ -81,8 +82,8 @@ Outside vg_core, but they decide what vg_core must support.
 
 In rough order of need:
 
-1. **Water**: rain exposure map, per-place water balance.
-2. **Warnings**: event types, thresholds, how forecasts come in.
-3. **C API**: the binding surface.
+1. **Dev interface**: what it shows first, and how it reaches vg_core ([D13](decisions.md#d13-a-desktop-dev-interface-before-the-phone-ui)).
+2. **Water**: rain exposure map, per-place water balance.
+3. **Warnings**: event types, thresholds, how forecasts come in.
 4. **Recommendations**: goals, suitability, layout suggestions.
 5. **Health detection**.

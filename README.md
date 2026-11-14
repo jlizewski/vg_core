@@ -18,6 +18,7 @@ on any platform.
 | `tests/` | C++ unit tests (GoogleTest) |
 | `cmake/` | CMake helper modules |
 | `src/io/`, `include/vg_core/io/` | `vg_core_io`: capture session recording and playback (MCAP) |
+| `include/vg_core_c/`, `src/c_api/` | `vg_core_c`: the [C API](docs/c-api.md) for apps in other languages (Dart, Swift, Kotlin) |
 | `apps/` | Command-line apps (`vg_replay`, `vg_map`, `vg_mcap_repair`), run as `vg replay`, `vg map`, `vg mcap repair` |
 | `tools/` | Python development tools (`vg` CLI) |
 | `docs/` | [Documentation](docs/README.md): vision, architecture, how each pipeline stage works, file formats, designs, decisions, roadmap |

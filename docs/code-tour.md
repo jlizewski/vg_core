@@ -118,10 +118,17 @@ In [include/vg_core/config/](../include/vg_core/config/).
 | --- | --- |
 | `config/mapping_config.hpp` | `MappingConfig`: every pipeline setting in one struct; the YAML sections. |
 | `config/params.hpp` | Binding settings to YAML paths and command-line flags. |
+| `config/jobs.hpp` | The pipeline jobs as functions: `replay`, `rerun_stages`, `add_to_site`, `make_site_maps`. The command-line apps and the C API both call these. |
 
 [config/mapping.yaml](../config/mapping.yaml) lists every setting with its
 default and an explanation. It's generated (`vg config defaults`); regenerate
 it after adding a setting.
+
+### C API (`vg_core_c`)
+
+[include/vg_core_c/vg_core_c.h](../include/vg_core_c/vg_core_c.h): the one
+header apps in other languages bind to, implemented in
+[src/c_api/](../src/c_api/). See [c-api.md](c-api.md).
 
 ## Command-line apps
 

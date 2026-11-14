@@ -126,11 +126,12 @@ an ordered edit log.
 
 ## D11. A C API for the app bindings
 
-**Proposed** · 2026-11-14
+**Decided** · 2026-11-14 · Built: [c-api.md](c-api.md)
 
 A small, stable `extern "C"` API (`vg_core_c`) over the C++ classes, used by
-Swift, Dart and other FFI callers; pybind11 for Python (VG Home); JNI and
-direct C++ where they already work.
+Dart, Swift, Kotlin and other FFI callers; pybind11 for Python (VG Home).
+Pipeline jobs run through the same functions as the command-line apps
+(`config/jobs.hpp`), so an app and the command line give the same result.
 
 *Why:* one binding layer instead of one per platform. See
 [architecture](architecture.md#bindings-planned).

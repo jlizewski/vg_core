@@ -60,7 +60,8 @@ What exists today, by CMake target:
 | --- | --- | --- |
 | `vg_core` | Map building, derived maps, sun, sky, registration, sites, segmentation steps | Eigen only |
 | `vg_core_io` | Reading and writing recordings (MCAP + protobuf), replaying them into a map package | vg_core, MCAP, zstd, protobuf lite |
-| `vg_core_config` | Every pipeline setting, bound to YAML paths and command-line flags | vg_core, vg_core_io, yaml-cpp |
+| `vg_core_config` | Every pipeline setting, bound to YAML paths and command-line flags; the pipeline jobs (replay, re-run stages, add to site) | vg_core, vg_core_io, yaml-cpp |
+| `vg_core_c` | The C API for apps in other languages ([c-api.md](c-api.md)); a shared library by default | vg_core_config (and so all of the above) |
 | `vg_core_onnx` | An `InferenceBackend` on ONNX Runtime, for labeling on a PC | vg_core, ONNX Runtime |
 | `apps/` | Command-line tools, run as `vg <name>` | All of the above |
 | `tools/` | The `vg` Python CLI, heatmaps, the dashboard | Python ≥ 3.10 |
@@ -130,10 +131,10 @@ Each app reaches vg_core differently:
 | ROS2 | C++ | Directly |
 | VG Home | Python (to sit beside Home Assistant) | pybind11 module |
 
-Several of these need a **C API** (`vg_core_c`): a small, stable set of
-`extern "C"` functions over the C++ classes. One C API serves Swift, Dart and
-any other language with a C FFI, so it's worth designing once instead of a
-wrapper per platform. Not started; see the [roadmap](roadmap.md).
+Most of these go through the **C API** (`vg_core_c`): a small, stable set of
+`extern "C"` functions over the C++ classes. One C API serves Dart, Swift,
+Kotlin and any other language with a C FFI, instead of a wrapper per
+platform. See [c-api.md](c-api.md).
 
 ## Conventions across the code
 

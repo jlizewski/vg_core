@@ -62,6 +62,29 @@ if(TARGET vg_core_config)
   gtest_discover_tests(vg_core_config_tests)
 endif()
 
+if(TARGET vg_core_c)
+  # The header compiled as C (not C++), as C callers and FFI generators read it.
+  add_library(vg_core_c_header_check STATIC c_api_header_check.c)
+  target_link_libraries(vg_core_c_header_check PRIVATE vg_core::vg_core_c)
+  if(MSVC)
+    target_compile_options(vg_core_c_header_check PRIVATE /W4 /WX)
+  else()
+    target_compile_options(vg_core_c_header_check PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
+
+  add_executable(vg_core_c_tests c_api_test.cpp)
+  target_link_libraries(vg_core_c_tests PRIVATE
+    vg_core_c_header_check vg_core::vg_core_c vg_core::vg_core_io GTest::gtest_main)
+  vg_core_set_warnings(vg_core_c_tests)
+  if(WIN32 AND VG_CORE_C_SHARED)
+    # Windows finds DLLs next to the executable.
+    add_custom_command(TARGET vg_core_c_tests POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:vg_core_c> $<TARGET_FILE_DIR:vg_core_c_tests>)
+  endif()
+  gtest_discover_tests(vg_core_c_tests DISCOVERY_MODE PRE_TEST)
+endif()
+
 if(TARGET vg_core_onnx)
   add_executable(vg_core_onnx_tests onnx_backend_test.cpp)
   target_link_libraries(vg_core_onnx_tests PRIVATE vg_core::vg_core_onnx GTest::gtest_main)

@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(vg_core
   VERSION 0.1.0
   DESCRIPTION "Platform-agnostic core for Victory Garden: mapping, entity tracking and sun analysis"
-  LANGUAGES CXX)
+  LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -30,6 +30,15 @@ endif()
 option(VG_CORE_BUILD_ONNX
   "Build vg_core_onnx (segmentation with ONNX Runtime, downloaded) and vg segment"
   ${_vg_core_onnx_default})
+# The C API for apps in other languages (docs/c-api.md). Needs vg_core_io and
+# vg_core_config. Shared for FFI (Dart, Python, desktop); apps that link it
+# statically (iOS) turn VG_CORE_C_SHARED off.
+option(VG_CORE_BUILD_C "Build vg_core_c, the C API (needs vg_core_io)" ON)
+option(VG_CORE_C_SHARED "Build vg_core_c as a shared library" ON)
+if(VG_CORE_BUILD_C AND VG_CORE_C_SHARED)
+  # Everything linked into the shared library, fetched dependencies included.
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
 
 include(cmake/CompilerWarnings.cmake)
 include(cmake/Dependencies.cmake)
@@ -112,15 +121,45 @@ if(VG_CORE_BUILD_IO)
   # Mapping settings: every tunable parameter of the map package pipeline,
   # read from YAML files and command-line flags. Kept out of vg_core so the
   # mapping library has no YAML dependency.
-  if(VG_CORE_BUILD_CONFIG OR VG_CORE_BUILD_APPS)
+  if(VG_CORE_BUILD_CONFIG OR VG_CORE_BUILD_APPS OR VG_CORE_BUILD_C)
     include(cmake/ConfigDependencies.cmake)
     add_library(vg_core_config
+      src/config/jobs.cpp
       src/config/mapping_config.cpp
       src/config/params.cpp)
     add_library(vg_core::vg_core_config ALIAS vg_core_config)
     target_link_libraries(vg_core_config PUBLIC vg_core_io PRIVATE yaml-cpp::yaml-cpp)
     set_target_properties(vg_core_config PROPERTIES CXX_EXTENSIONS OFF)
     vg_core_set_warnings(vg_core_config)
+  endif()
+
+  # The C API: one header (include/vg_core_c/vg_core_c.h) over the C++ library.
+  if(VG_CORE_BUILD_C)
+    set(_vg_core_c_sources
+      src/c_api/library.cpp
+      src/c_api/map_builder.cpp
+      src/c_api/maps.cpp
+      src/c_api/pipeline.cpp
+      src/c_api/recorder.cpp)
+    if(VG_CORE_C_SHARED)
+      add_library(vg_core_c SHARED ${_vg_core_c_sources})
+      # Consumers on Windows import the functions from the DLL.
+      target_compile_definitions(vg_core_c INTERFACE VG_CORE_C_SHARED)
+    else()
+      add_library(vg_core_c STATIC ${_vg_core_c_sources})
+    endif()
+    add_library(vg_core::vg_core_c ALIAS vg_core_c)
+    target_compile_definitions(vg_core_c PRIVATE VG_CORE_C_BUILD)
+    target_include_directories(vg_core_c
+      PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>)
+    target_link_libraries(vg_core_c PRIVATE vg_core_config)
+    set_target_properties(vg_core_c PROPERTIES
+      CXX_EXTENSIONS OFF
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
+    vg_core_set_warnings(vg_core_c)
   endif()
 
   # Each apps/vg_<name>.cpp is a target vg_<name>, which the Python tools run
@@ -145,6 +184,8 @@ if(VG_CORE_BUILD_IO)
       vg_core_set_warnings(${app})
     endforeach()
   endif()
+elseif(VG_CORE_BUILD_C)
+  message(WARNING "vg_core_c needs VG_CORE_BUILD_IO; not building it")
 endif()
 
 if(VG_CORE_BUILD_TESTS)
