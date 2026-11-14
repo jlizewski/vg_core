@@ -64,6 +64,9 @@ vg::MapBuilderConfig to_builder_config(const vg_map_builder_config& c) {
   b.max_pose_age = c.max_pose_age_ns;
   b.keyframe_translation = c.keyframe_translation;
   b.keyframe_rotation = c.keyframe_rotation;
+  // vg replay's batch rebuild drops non-keyframes; apps using this API map live
+  // and fuse the deferred frames later (vg_map_builder_integrate_deferred).
+  b.drop_non_keyframes = false;
   b.deferred_path = vg::c_api::text(c.deferred_path);
   return b;
 }
