@@ -113,6 +113,15 @@
           <table id="visitTable"></table>
         </div>
         <div class="card">
+          <h2>Watch a walk in Foxglove</h2>
+          <p class="hint">Plays a walk back like a bag in RViz: the phone's depth as point clouds (magenta), in the
+            site's frame over its 3D model, so you can see where tracking or the fit drifts. A walk's
+            <b>Foxglove</b> button makes the file (once) and opens it.</p>
+          <p class="hint">First time: install <a href="https://foxglove.dev/download" target="_blank" rel="noopener">Foxglove</a>,
+            then import <a href="/foxglove-layout.json">this layout</a> (Layouts menu → Import from file).</p>
+          <div class="hint" id="foxStatus" style="margin:0"></div>
+        </div>
+        <div class="card">
           <h2>Walks not in the site</h2>
           <p class="hint">Add the long walks first: each walk is matched against everything added before it.</p>
           <div id="pending"></div>
@@ -201,7 +210,7 @@ function renderSites() {
   if (!site) { $("visitTable").innerHTML = `<tr><td class="empty">No sites yet.</td></tr>`; $("pending").innerHTML = ""; return; }
 
   const walks = Object.fromEntries(site.walks.map((w) => [w.name, w]));
-  $("visitTable").innerHTML = `<tr><th>#</th><th>Walk</th><th>Turn</th><th>Fit</th><th>Rival</th></tr>` +
+  $("visitTable").innerHTML = `<tr><th>#</th><th>Walk</th><th>Turn</th><th>Fit</th><th>Rival</th><th></th></tr>` +
     site.visits.map((v, i) => {
       const fit = v.inliers_30cm, cls = fit == null ? "" : fit >= 0.65 ? "good" : fit >= 0.5 ? "warn" : "bad";
       const w = walks[v.walk] || {};
@@ -209,17 +218,20 @@ function renderSites() {
         <td>${esc(v.walk)}<br><span class="hint">${esc(when(v.recorded))}${w.sky_frames ? ` · sky ${w.sky_frames} fr` : ""}${w.gps_bearing_sigma_deg != null ? ` · GPS ±${w.gps_bearing_sigma_deg.toFixed(1)}°` : ""}</span></td>
         <td class="num">${v.yaw_deg.toFixed(1)}°</td>
         <td class="num ${cls}">${fit == null ? "frame" : pct(fit)}</td>
-        <td class="num">${v.rival_ratio ? (v.rival_ratio > 99 ? ">99" : v.rival_ratio.toFixed(1)) + "×" : ""}</td></tr>`;
+        <td class="num">${v.rival_ratio ? (v.rival_ratio > 99 ? ">99" : v.rival_ratio.toFixed(1)) + "×" : ""}</td>
+        <td><button class="plain" data-fox="${esc(v.walk)}" title="Play this walk over the site's 3D model">Foxglove</button></td></tr>`;
     }).join("");
 
   const inSite = new Set(site.visits.map((v) => v.walk));
   const pending = site.walks.filter((w) => !inSite.has(w.name));
   $("pending").innerHTML = pending.length ? pending.map((w) =>
       `<label class="row"><input type="checkbox" data-add="${esc(w.name)}"> ${esc(w.name)}
-        <span class="hint" style="margin:0">${esc(when(w.stamp))}${w.label_consistency ? ` · labels ${pct(w.label_consistency)}` : ""}</span></label>`).join("") +
+        <span class="hint" style="margin:0">${esc(when(w.stamp))}${w.label_consistency ? ` · labels ${pct(w.label_consistency)}` : ""}</span>
+        <button class="plain" data-fox="${esc(w.name)}" title="Line it up with the site and play it over the 3D model, without adding it">Foxglove</button></label>`).join("") +
       `<div class="row" style="margin-top:8px"><button class="act" id="addWalks">Add to site</button>
         <label class="hint" style="margin:0"><input type="checkbox" id="force"> force (add even if it doesn't fit convincingly)</label></div>`
     : `<span class="empty">Every walk is in the site.</span>`;
+  document.querySelectorAll("[data-fox]").forEach((b) => b.onclick = (e) => { e.preventDefault(); openFoxglove(site.name, b.dataset.fox); });
   if ($("addWalks")) $("addWalks").onclick = () => {
     const chosen = [...document.querySelectorAll("[data-add]:checked")].map((x) => x.dataset.add);
     if (chosen.length) startJob("/api/site/add", { site: site.name, walks: chosen, force: $("force").checked });
@@ -358,6 +370,17 @@ async function startJob(path, body) {
     showLog(job.id);
     refresh();
   } catch (e) { alert(e.message); }
+}
+async function openFoxglove(site, walk) {
+  $("foxStatus").textContent = `Opening ${walk}…`;
+  try {
+    const r = await api("/api/foxglove", { site, walk });
+    if (r.opened) { $("foxStatus").textContent = r.message; return; }
+    $("foxStatus").textContent = `Making the Foxglove file for ${walk} (job ${r.id}); it opens when done.`;
+    document.querySelector('nav button[data-tab="jobs"]').click();
+    showLog(r.id);
+    refresh();
+  } catch (e) { $("foxStatus").textContent = e.message; }
 }
 function showLog(id) { logJob = id; logNext = 0; $("log").textContent = ""; pollLog(); }
 async function pollLog() {

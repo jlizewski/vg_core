@@ -63,6 +63,7 @@ add_library(vg_core
   src/site.cpp
   src/sky.cpp
   src/sun_map.cpp
+  src/surface_mesh.cpp
   src/terrain.cpp
   src/tsdf_volume.cpp
   src/voxel_cleanup.cpp
@@ -91,6 +92,7 @@ target_include_directories(vg_core PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated
 if(VG_CORE_BUILD_IO)
   include(cmake/IoDependencies.cmake)
   add_library(vg_core_io
+    src/io/foxglove_export.cpp
     src/io/image_decode.cpp
     src/io/map_build.cpp
     src/io/mcap_impl.cpp

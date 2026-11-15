@@ -25,7 +25,7 @@ vg = "vg_tools.cli:main"
 include = ["vg_tools*"]
 
 [tool.setuptools.package-data]
-vg_tools = ["dashboard.html"]
+vg_tools = ["dashboard.html", "foxglove_layout.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

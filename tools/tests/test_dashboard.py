@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import threading
 import time
@@ -151,3 +152,42 @@ def test_serves_the_page_and_api(tmp_path: Path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_foxglove_makes_the_file_once_then_opens_it(tmp_path: Path, monkeypatch):
+    ws = make_workspace(tmp_path)
+    opened: list[Path] = []
+    monkeypatch.setattr(dashboard.foxglove, "open_file",
+                        lambda path: opened.append(path) or f"opened {path}")
+    jobs = dashboard.Jobs(tmp_path, command=[sys.executable, "-c", "pass"])
+    walk = ws.sites / "backyard" / "walks" / "shed"
+    out = walk / "foxglove.mcap"
+
+    started = dashboard.open_in_foxglove(ws, jobs, "backyard", "shed")
+    job = jobs.get(started["id"])
+    assert job.args[:3] == ["foxglove", str(ws.recordings / "recording-20261109-120459.vgcap.mcap"),
+                            str(out)]
+    assert job.args[3:] == ["--site", str(ws.sites / "backyard"), "--walk", str(walk)]
+    deadline = time.time() + 20
+    while time.time() < deadline and job.state in ("queued", "running"):
+        time.sleep(0.05)
+    assert job.state == "done" and opened == [out] and job.lines[-1] == f"opened {out}"
+
+    # Made after everything it comes from: opened straight away.
+    out.write_bytes(b"")
+    later = time.time() + 60
+    os.utime(out, (later, later))
+    again = dashboard.open_in_foxglove(ws, jobs, "backyard", "shed")
+    assert again == {"opened": True, "message": f"opened {out}"}
+
+    with pytest.raises(ValueError):  # No manifest: no recording to show.
+        dashboard.open_in_foxglove(ws, jobs, "backyard", "fence")
+
+
+def test_foxglove_can_be_named(monkeypatch):
+    from vg_tools import foxglove
+
+    monkeypatch.setenv("VG_FOXGLOVE", "/opt/fox/foxglove")
+    assert foxglove.find() == ["/opt/fox/foxglove"]
+    assert foxglove.LAYOUT.is_file()
+    assert "3D!vgwalk" in json.loads(foxglove.LAYOUT.read_text())["configById"]

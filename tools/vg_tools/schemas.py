@@ -20,8 +20,10 @@ SCHEMAS = {
     "foxglove.CompressedImage": "foxglove/CompressedImage.proto",
     "foxglove.FrameTransforms": "foxglove/FrameTransforms.proto",
     "foxglove.LocationFix": "foxglove/LocationFix.proto",
+    "foxglove.PointCloud": "foxglove/PointCloud.proto",
     "foxglove.PoseInFrame": "foxglove/PoseInFrame.proto",
     "foxglove.RawImage": "foxglove/RawImage.proto",
+    "foxglove.SceneUpdate": "foxglove/SceneUpdate.proto",
     "vg.GeoPose": "vg/geo_pose.proto",
     "vg.Imu": "vg/imu.proto",
     "vg.SessionInfo": "vg/session_info.proto",
@@ -110,5 +112,10 @@ def generate(root: Path) -> int:
     out = root / OUTPUT
     out.write_text(render(sets), encoding="utf-8", newline="\n")
     print(f"vg: wrote {OUTPUT}")
-    clang_format = subprocess.run(["clang-format", "-i", str(out)], check=False)
+    try:
+        clang_format = subprocess.run(["clang-format", "-i", str(out)], check=False)
+    except FileNotFoundError:
+        print(f"vg: clang-format isn't on PATH; format {OUTPUT} before committing",
+              file=sys.stderr)
+        return 1
     return clang_format.returncode

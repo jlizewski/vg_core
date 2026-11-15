@@ -501,9 +501,11 @@ vg site maps garden-site                       # remake current/ only
   name), with each walk's transform into the site frame and its fit.
   `current/` holds the site's maps in its frame, each cell from the latest
   walk that saw it (`surface`, `ground`, `terrain`, `features`, `semantic`),
-  plus `visit.asc` (which walk each cell came from) and `changes.asc` (the
+  plus `visit.asc` (which walk each cell came from), `changes.asc` (the
   surface's change since the walk before: growth, and misalignment along
-  walls).
+  walls) and `model.glb`, the site in 3D: the surface colored by class with
+  the canopy's underside see-through over it (`Site::model()`; opens in
+  Windows' 3D Viewer, Blender or a browser).
 - Settings: the `site` section of [config/mapping.yaml](config/mapping.yaml).
   Packages missing their terrain maps get them first.
 
@@ -520,9 +522,54 @@ it: recordings -> walks -> a site -> its maps.
   not yet added (add them, long walks first), and any map of the site or of
   one walk, with every walk's path over it and the value under the cursor.
 - **Jobs**: replays and site builds run one at a time, with their logs.
+- **Foxglove**: each walk's button opens it in Foxglove over the site's 3D
+  model (see below), making the file first if needed.
 
 A site is a folder under `--sites` with its walks in `walks/`, so the whole
 site can be moved or copied. It's pure Python, nothing to install.
+
+### Watching a walk in Foxglove
+
+[Foxglove](https://foxglove.dev/download) plays a walk back the way RViz plays
+a bag: `vg foxglove` turns a recording into a file with the walk's poses as
+transforms and each depth image as a point cloud, placed in the site's frame
+over its 3D model, so you can see where tracking drifts or a walk doesn't
+line up with the site.
+
+```sh
+vg foxglove rec.vgcap.mcap walk/foxglove.mcap --site garden-site --walk walk/
+vg foxglove rec.vgcap.mcap out.mcap      # just the walk, no site
+```
+
+| Topic | What | Frame |
+| --- | --- | --- |
+| `/site/model` | the site's surface (by class) and canopy | `site` |
+| `/tf_static`, `/tf` | `site` → `world` (the walk's place in the site), `world` → `body` (every pose), `body` → `cam/rgb` | |
+| `/cam/rgb/points` | each depth image (fields `x y z`, `red green blue alpha` by class, `confidence`, `label`) | `cam/rgb` |
+| `/cam/rgb/image`, `/cam/rgb/calibration` | the camera, thinned to 10 Hz (`--image-rate`, `--no-images`) | `cam/rgb` |
+| `/walk/path` | the whole walk as a line | `world` |
+
+The poses have the tracker's jumps undone as `vg replay` does, so they're the
+ones the map was built from. A walk that's a visit of the site is placed as
+in `site.csv`; any other is registered against the site there and then, and
+shown even if the fit isn't convincing, to see why.
+
+In the dashboard, a walk's **Foxglove** button does all this and opens
+Foxglove (found from its `.mcap` registration, or set `VG_FOXGLOVE`). The
+first time, import the starting layout,
+[tools/vg_tools/foxglove_layout.json](tools/vg_tools/foxglove_layout.json)
+(Layouts → Import from file): a 3D view following the phone over the site,
+with the camera image beside it. Coming from RViz:
+
+- The 3D panel is RViz's main view; its settings (gear) list every topic and
+  frame, like RViz's Displays.
+- The display frame follows `body` (the phone); with the follow mode at
+  *Position* the view stays level with the site as it moves.
+- Point clouds are magenta (flat color) to stand out against the model;
+  their color mode *RGBA (separate fields)* shows them by class instead, and
+  a *decay time* keeps earlier clouds on screen, as in RViz.
+- Scrub the timeline at the bottom; the camera image shows what the phone
+  saw at that moment.
 
 ## Development tools (Python ≥ 3.10)
 
@@ -544,6 +591,7 @@ vg labels compare a.mcap b.mcap  # how two labelings of a recording differ
                     # (both need: pip install -e "tools[analysis]")
 vg path stats garden/            # the phone's height over the ground along the walk
 vg site add site/ walk/          # vg_site: line up walks of one place (see Sites)
+vg foxglove rec.mcap out.mcap --site site/ --walk walk/  # a walk to watch in Foxglove
 vg dashboard --recordings DIR --sites DIR  # browser dashboard (see Sites)
 vg models export NAME m.tflite   # a segmentation model as ONNX for vg segment
                     # (needs: pip install -e "tools[models]", large: TensorFlow)

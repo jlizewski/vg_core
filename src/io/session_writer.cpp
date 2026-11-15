@@ -4,59 +4,25 @@
 #include <mcap/writer.hpp>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 
+#include "mcap_channels.hpp"
 #include "messages.hpp"
-#include "schema_descriptors.hpp"
 
 namespace vg::io {
 
 struct SessionWriter::Impl {
   mcap::McapWriter writer;
+  detail::McapChannels channels{writer};
   bool open = false;
-  std::unordered_map<std::string, mcap::SchemaId> schemas;
-  std::unordered_map<std::string, mcap::ChannelId> channels;
   // Last depth calibration written per camera, to write it only on change.
   std::map<std::string, CameraIntrinsics> depth_calibrations;
-
-  mcap::ChannelId channel(const std::string& topic, const std::string& schema_name) {
-    if (auto it = channels.find(topic); it != channels.end()) {
-      return it->second;
-    }
-    auto schema_it = schemas.find(schema_name);
-    if (schema_it == schemas.end()) {
-      const std::string_view descriptor = detail::schema_descriptor(schema_name);
-      if (descriptor.empty()) {
-        throw std::logic_error("session: no descriptor for " + schema_name);
-      }
-      mcap::Schema schema(schema_name, "protobuf", descriptor);
-      writer.addSchema(schema);
-      schema_it = schemas.emplace(schema_name, schema.id).first;
-    }
-    mcap::Channel ch(topic, "protobuf", schema_it->second);
-    writer.addChannel(ch);
-    return channels.emplace(topic, ch.id).first->second;
-  }
 
   void write(const std::string& topic, const std::string& schema_name, Timestamp timestamp,
              const std::string& data) {
     if (!open) {
       throw std::logic_error("session: write after close");
     }
-    if (timestamp < 0) {
-      throw std::invalid_argument("session: negative timestamp on " + topic);
-    }
-    mcap::Message message;
-    message.channelId = channel(topic, schema_name);
-    message.sequence = 0;
-    message.logTime = static_cast<mcap::Timestamp>(timestamp);
-    message.publishTime = message.logTime;
-    message.data = reinterpret_cast<const std::byte*>(data.data());
-    message.dataSize = data.size();
-    const mcap::Status status = writer.write(message);
-    if (!status.ok()) {
-      throw std::runtime_error("session: writing " + topic + ": " + status.message);
-    }
+    channels.write(topic, schema_name, timestamp, data, "session");
   }
 };
 

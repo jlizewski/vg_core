@@ -5,8 +5,9 @@ walks (map packages) -> sites -> maps, as the app will run it on the phone.
 
 Serves a page on http://127.0.0.1:PORT (this computer only) that lists the
 recordings and sites, runs vg replay / vg site / vg mcap stats as jobs (one
-at a time, with their logs), and shows any map of a site or walk with the
-walks' paths over it.
+at a time, with their logs), shows any map of a site or walk with the
+walks' paths over it, and opens a walk in Foxglove over the site's 3D model
+(vg foxglove; see vg_tools/foxglove.py).
 
 A site is a directory under --sites: walks/<name>/ holds its walks (map
 packages, made from recordings by vg replay), and vg site keeps site.csv and
@@ -24,12 +25,13 @@ import sys
 import threading
 import time
 import webbrowser
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from vg_tools import heatmap, semantics
+from vg_tools import foxglove, heatmap, semantics
 
 PAGE = Path(__file__).with_name("dashboard.html")
 RECORDING_SUFFIX = ".vgcap.mcap"
@@ -233,6 +235,8 @@ class Job:
     started: float | None = None
     ended: float | None = None
     lines: list[str] = field(default_factory=list)
+    # Run after it succeeds; returns a line for the log.
+    on_done: Callable[[], str] | None = None
 
     def summary(self) -> dict:
         return {"id": self.id, "title": self.title, "state": self.state,
@@ -253,9 +257,10 @@ class Jobs:
         self.wake = threading.Condition(self.lock)
         threading.Thread(target=self._work, daemon=True).start()
 
-    def submit(self, title: str, args: list[str]) -> Job:
+    def submit(self, title: str, args: list[str],
+               on_done: Callable[[], str] | None = None) -> Job:
         with self.lock:
-            job = Job(len(self.jobs) + 1, title, args)
+            job = Job(len(self.jobs) + 1, title, args, on_done=on_done)
             self.jobs.append(job)
             self.wake.notify()
             return job
@@ -290,6 +295,13 @@ class Jobs:
                 with self.lock:
                     job.lines.append(f"dashboard: cannot run: {e}")
                 rc = -1
+            if rc == 0 and job.on_done is not None:
+                try:
+                    line = job.on_done()
+                except Exception as e:  # Shown in the log, not lost in the thread.
+                    line = f"dashboard: {e}"
+                with self.lock:
+                    job.lines.append(line)
             with self.lock:
                 job.returncode = rc
                 job.state = "done" if rc == 0 else "failed"
@@ -326,6 +338,44 @@ def start_site_maps(ws: Workspace, jobs: Jobs, site: str) -> Job:
 
 def start_stats(ws: Workspace, jobs: Jobs, recording: str) -> Job:
     return jobs.submit(f"stats {recording}", ["mcap", "stats", str(ws.recording(recording))])
+
+
+def _walk_dir(ws: Workspace, site: str, walk: str) -> Path:
+    path = ws.site(site) / "walks" / walk
+    if not valid_name(walk) or not path.is_dir():
+        raise ValueError(f"no walk {walk!r} in {site}")
+    return path
+
+
+def _mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def open_in_foxglove(ws: Workspace, jobs: Jobs, site: str, walk: str) -> dict:
+    """Opens the walk in Foxglove, over the site's model when the site has
+    visits. The viewer file (foxglove.mcap in the walk) is made by a job
+    first, unless it's newer than everything it's made from."""
+    walk_dir = _walk_dir(ws, site, walk)
+    site_dir = ws.site(site)
+    session = _manifest(walk_dir).get("session", "")
+    if not session:
+        raise ValueError(f"{site}/{walk} has no manifest.json naming its recording")
+    recording = ws.recording(Path(session).name)
+    out = walk_dir / "foxglove.mcap"
+    with_site = bool(read_visits(site_dir))
+    sources = [recording, walk_dir / "manifest.json"]
+    if with_site:
+        sources += [site_dir / "site.csv", site_dir / "current" / "surface.asc"]
+    if out.is_file() and _mtime(out) > max(_mtime(p) for p in sources):
+        return {"opened": True, "message": foxglove.open_file(out)}
+    args = ["foxglove", str(recording), str(out)]
+    if with_site:
+        args += ["--site", str(site_dir), "--walk", str(walk_dir)]
+    job = jobs.submit(f"foxglove {site}/{walk}", args, on_done=lambda: foxglove.open_file(out))
+    return job.summary()
 
 
 def create_site(ws: Workspace, name: str) -> None:
@@ -366,6 +416,15 @@ def make_handler(ws: Workspace, jobs: Jobs):
                         "classes": [{"name": n, "color": c} for n, c in semantics.CLASSES],
                         "palette": [[t, list(c)] for t, c in heatmap.STOPS],
                     })
+                elif url.path == "/foxglove-layout.json":
+                    self.send_response(200)
+                    body = foxglove.LAYOUT.read_bytes()
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Disposition",
+                                     'attachment; filename="vg-foxglove-layout.json"')
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
                 elif url.path == "/api/jobs":
                     self._json(jobs.summaries())
                 elif url.path == "/api/job":
@@ -400,6 +459,9 @@ def make_handler(ws: Workspace, jobs: Jobs):
                     job = start_site_maps(ws, jobs, body["site"])
                 elif url.path == "/api/stats":
                     job = start_stats(ws, jobs, body["recording"])
+                elif url.path == "/api/foxglove":
+                    self._json(open_in_foxglove(ws, jobs, body["site"], body["walk"]))
+                    return
                 elif url.path == "/api/site/create":
                     create_site(ws, body["site"])
                     self._json({"ok": True})

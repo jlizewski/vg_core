@@ -14,6 +14,7 @@
 
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/map_package.hpp"
+#include "vg_core/semantics.hpp"
 #include "vg_core/voxel_map_io.hpp"
 
 namespace vg {
@@ -235,23 +236,44 @@ void Site::save() const {
   }
 }
 
-RegistrationResult Site::add(const std::filesystem::path& package, const RegistrationConfig& config,
-                             std::ostream& log, bool force) {
-  const auto start = std::chrono::steady_clock::now();
-  if (package.generic_string().find(',') != std::string::npos) {
-    throw std::runtime_error("site: package paths can't contain commas: " + package.string());
-  }
+namespace {
+
+void require_site_maps(const std::filesystem::path& package) {
   for (const char* file : {package_file::kFeatures, package_file::kTerrain}) {
     if (!std::filesystem::is_regular_file(package / file)) {
       throw std::runtime_error("site: " + (package / file).string() +
                                " is missing (run the surface, ground and terrain stages)");
     }
   }
-  MapPackage map(package, log);
+}
+
+RegistrationInput registration_input(const std::filesystem::path& package, MapPackage& map) {
   RegistrationInput input;
   input.points = map.occupied_centers();
   input.features = load_height_map(package / package_file::kFeatures);
   input.terrain = load_height_map(package / package_file::kTerrain);
+  return input;
+}
+
+}  // namespace
+
+RegistrationResult Site::locate(const std::filesystem::path& package,
+                                const RegistrationConfig& config, std::ostream& log) const {
+  if (visits_.empty()) {
+    throw std::runtime_error("site: " + dir_.string() + " has no visits to line up with");
+  }
+  require_site_maps(package);
+  MapPackage map(package, log);
+  return fit(package, map, registration_input(package, map), config, log);
+}
+
+RegistrationResult Site::add(const std::filesystem::path& package, const RegistrationConfig& config,
+                             std::ostream& log, bool force) {
+  if (package.generic_string().find(',') != std::string::npos) {
+    throw std::runtime_error("site: package paths can't contain commas: " + package.string());
+  }
+  require_site_maps(package);
+  MapPackage map(package, log);
 
   SiteVisit visit;
   // Kept relative to the site when it's inside it, so the site can move.
@@ -272,63 +294,9 @@ RegistrationResult Site::add(const std::filesystem::path& package, const Registr
     log << "site: " << package.string() << " is the first visit: it sets the site's frame"
         << std::endl;
   } else {
-    // The reference: every visit so far, in the site frame.
-    RegistrationInput reference;
-    std::vector<std::pair<HeightMap, MapTransform>> features;
-    std::vector<std::pair<HeightMap, MapTransform>> terrains;
-    // A prior from GPS, through the visit with the best GPS heading: the
-    // site's yaw of that visit plus the turn from its heading to this
-    // package's, and this package's origin placed from that visit's by their
-    // GPS positions.
-    RegistrationPrior prior;
-    const auto& geo = map.metadata().geo;
-    for (const SiteVisit& v : visits_) {
-      const auto dir = package_dir(v);
-      MapPackage earlier(dir, log);
-      const auto& other = earlier.metadata().geo;
-      if (config.use_gps && geo && other && std::isfinite(geo->heading_sigma) &&
-          std::isfinite(other->heading_sigma)) {
-        const double sigma = std::hypot(geo->heading_sigma, other->heading_sigma);
-        if (!prior.yaw || sigma < prior.yaw_sigma) {
-          prior.yaw = v.site_from_map.yaw + geo->heading - other->heading;
-          prior.yaw_sigma = sigma;
-          // This package's origin east and north of the visit's (m), then
-          // in the visit's frame (enu = Rz(heading) world), then the site's.
-          constexpr double kMetersPerDegree = 111'320.0;
-          const Eigen::Vector2d enu(
-              (geo->longitude - other->longitude) * kMetersPerDegree *
-                  std::cos(other->latitude * kPi / 180.0),
-              (geo->latitude - other->latitude) * kMetersPerDegree);
-          const Eigen::Vector2d world = Eigen::Rotation2Dd(-other->heading) * enu;
-          prior.origin = v.site_from_map.apply_xy(world);
-          prior.origin_sigma = config.gps_position_sigma;
-        }
-      }
-      for (const Eigen::Vector3d& p : earlier.occupied_centers()) {
-        reference.points.push_back(v.site_from_map.apply(p));
-      }
-      features.emplace_back(load_height_map(dir / package_file::kFeatures), v.site_from_map);
-      terrains.emplace_back(load_height_map(dir / package_file::kTerrain), v.site_from_map);
-    }
-    reference.features = resample(features, false).latest;
-    reference.terrain = resample(terrains, true).latest;
-
-    result = register_map(reference, input, config, prior);
+    result = fit(package, map, registration_input(package, map), config, log);
     visit.site_from_map = result.reference_from_map;
     visit.fit = result;
-    const MapTransform& t = result.reference_from_map;
-    log << "site: " << package.string() << " -> yaw " << t.yaw * 180.0 / kPi << " deg, shift ("
-        << t.translation.x() << ", " << t.translation.y() << ", " << t.translation.z()
-        << ") m; heading " << (result.used_prior ? "searched near GPS" : "searched all round")
-        << ", peak " << result.peak;
-    if (result.rival_ratio > 0.0) {
-      log << ", lines up " << result.rival_ratio << "x as well as turned "
-          << result.rival_yaw * 180.0 / kPi << " deg";
-    }
-    log << "; overlap " << 100.0 * result.overlap
-        << "%, of it within 10 cm " << 100.0 * result.inliers_10cm << "%, within 30 cm "
-        << 100.0 * result.inliers_30cm << "%, median " << 100.0 * result.median_distance
-        << " cm (" << seconds_since(start) << " s)" << std::endl;
     if (!result.accepted) {
       log << "site: " << (force ? "adding anyway (forced): " : "not added: ") << result.problem
           << std::endl;
@@ -347,6 +315,67 @@ RegistrationResult Site::add(const std::filesystem::path& package, const Registr
   return result;
 }
 
+RegistrationResult Site::fit(const std::filesystem::path& package, MapPackage& map,
+                             const RegistrationInput& input, const RegistrationConfig& config,
+                             std::ostream& log) const {
+  const auto start = std::chrono::steady_clock::now();
+  // The reference: every visit so far, in the site frame.
+  RegistrationInput reference;
+  std::vector<std::pair<HeightMap, MapTransform>> features;
+  std::vector<std::pair<HeightMap, MapTransform>> terrains;
+  // A prior from GPS, through the visit with the best GPS heading: the
+  // site's yaw of that visit plus the turn from its heading to this
+  // package's, and this package's origin placed from that visit's by their
+  // GPS positions.
+  RegistrationPrior prior;
+  const auto& geo = map.metadata().geo;
+  for (const SiteVisit& v : visits_) {
+    const auto dir = package_dir(v);
+    MapPackage earlier(dir, log);
+    const auto& other = earlier.metadata().geo;
+    if (config.use_gps && geo && other && std::isfinite(geo->heading_sigma) &&
+        std::isfinite(other->heading_sigma)) {
+      const double sigma = std::hypot(geo->heading_sigma, other->heading_sigma);
+      if (!prior.yaw || sigma < prior.yaw_sigma) {
+        prior.yaw = v.site_from_map.yaw + geo->heading - other->heading;
+        prior.yaw_sigma = sigma;
+        // This package's origin east and north of the visit's (m), then
+        // in the visit's frame (enu = Rz(heading) world), then the site's.
+        constexpr double kMetersPerDegree = 111'320.0;
+        const Eigen::Vector2d enu((geo->longitude - other->longitude) * kMetersPerDegree *
+                                      std::cos(other->latitude * kPi / 180.0),
+                                  (geo->latitude - other->latitude) * kMetersPerDegree);
+        const Eigen::Vector2d world = Eigen::Rotation2Dd(-other->heading) * enu;
+        prior.origin = v.site_from_map.apply_xy(world);
+        prior.origin_sigma = config.gps_position_sigma;
+      }
+    }
+    for (const Eigen::Vector3d& p : earlier.occupied_centers()) {
+      reference.points.push_back(v.site_from_map.apply(p));
+    }
+    features.emplace_back(load_height_map(dir / package_file::kFeatures), v.site_from_map);
+    terrains.emplace_back(load_height_map(dir / package_file::kTerrain), v.site_from_map);
+  }
+  reference.features = resample(features, false).latest;
+  reference.terrain = resample(terrains, true).latest;
+
+  const RegistrationResult result = register_map(reference, input, config, prior);
+  const MapTransform& t = result.reference_from_map;
+  log << "site: " << package.string() << " -> yaw " << t.yaw * 180.0 / kPi << " deg, shift ("
+      << t.translation.x() << ", " << t.translation.y() << ", " << t.translation.z()
+      << ") m; heading " << (result.used_prior ? "searched near GPS" : "searched all round")
+      << ", peak " << result.peak;
+  if (result.rival_ratio > 0.0) {
+    log << ", lines up " << result.rival_ratio << "x as well as turned "
+        << result.rival_yaw * 180.0 / kPi << " deg";
+  }
+  log << "; overlap " << 100.0 * result.overlap << "%, of it within 10 cm "
+      << 100.0 * result.inliers_10cm << "%, within 30 cm " << 100.0 * result.inliers_30cm
+      << "%, median " << 100.0 * result.median_distance << " cm (" << seconds_since(start) << " s)"
+      << std::endl;
+  return result;
+}
+
 void Site::make_maps(std::ostream& log, const CanopyConfig& canopy_config) const {
   const auto start = std::chrono::steady_clock::now();
   const auto out = dir_ / site_file::kCurrent;
@@ -355,8 +384,9 @@ void Site::make_maps(std::ostream& log, const CanopyConfig& canopy_config) const
     std::vector<std::pair<HeightMap, MapTransform>> maps;
     for (const SiteVisit& v : visits_) {
       const auto path = package_dir(v) / file;
-      maps.emplace_back(std::filesystem::is_regular_file(path) ? load_height_map(path) : HeightMap{},
-                        v.site_from_map);
+      maps.emplace_back(
+          std::filesystem::is_regular_file(path) ? load_height_map(path) : HeightMap{},
+          v.site_from_map);
     }
     const Layered layered = resample(maps, heights);
     save_height_map(layered.latest, out / file);
@@ -394,8 +424,68 @@ void Site::make_maps(std::ostream& log, const CanopyConfig& canopy_config) const
     log << "site: canopy " << canopy.cells.size() << " cells of " << canopy.observed
         << " judged, from " << sky->frames() << " labeled frames" << std::endl;
   }
+  const std::vector<MeshPart> parts = model();
+  save_glb(parts, out / site_file::kModel);
+  log << "site: model " << parts[0].mesh.triangles() << " surface and " << parts[1].mesh.triangles()
+      << " canopy triangles" << std::endl;
   log << "site: " << visits_.size() << " visits -> " << site_file::kCurrent << "/ ("
       << seconds_since(start) << " s)" << std::endl;
+}
+
+std::vector<MeshPart> Site::model() const {
+  const auto dir = dir_ / site_file::kCurrent;
+  const auto load = [&](const char* file) {
+    const auto path = dir / file;
+    return std::filesystem::is_regular_file(path) ? load_height_map(path) : HeightMap{};
+  };
+  const HeightMap surface = load(package_file::kSurface);
+  const HeightMap semantic = load(package_file::kSemantic);
+  const HeightMap terrain = load(package_file::kTerrain);
+  // Its underside, over the terrain: what's measured (the top is only an
+  // upper bound; see sky.hpp).
+  HeightMap canopy = load(package_file::kCanopy);
+
+  // other's value at the center of map's cell (x, y), NaN if none (the maps'
+  // grids may cover different extents).
+  const auto sample = [](const HeightMap& map, const HeightMap& other, int x, int y) {
+    constexpr float kNone = std::numeric_limits<float>::quiet_NaN();
+    if (other.width == 0) {
+      return kNone;
+    }
+    const Eigen::Vector2d p =
+        map.origin + (Eigen::Vector2d(x, y).array() + 0.5).matrix() * map.cell_size;
+    const Eigen::Vector2d q = (p - other.origin) / other.cell_size;
+    const int ox = static_cast<int>(std::floor(q.x()));
+    const int oy = static_cast<int>(std::floor(q.y()));
+    return ox >= 0 && oy >= 0 && ox < other.width && oy < other.height ? other.at(ox, oy) : kNone;
+  };
+  const auto rgba = [](const std::array<std::uint8_t, 3>& c) {
+    return Rgba{c[0], c[1], c[2], 255};
+  };
+
+  std::vector<MeshPart> parts(2);
+  parts[0].name = "surface";
+  parts[0].mesh = mesh_from_height_map(surface, [&](int x, int y) {
+    const float v = sample(surface, semantic, x, y);
+    const auto c = v >= 0.0f && v < static_cast<float>(kSemanticClasses)
+                       ? static_cast<SemanticClass>(static_cast<int>(v))
+                       : SemanticClass::Unknown;
+    return rgba(semantic_class_color(c));
+  });
+
+  for (int y = 0; y < canopy.height; ++y) {
+    for (int x = 0; x < canopy.width; ++x) {
+      float& h = canopy.heights[static_cast<std::size_t>(y) * static_cast<std::size_t>(canopy.width) +
+                                static_cast<std::size_t>(x)];
+      h += sample(canopy, terrain, x, y);  // NaN where there's no terrain.
+    }
+  }
+  parts[1].name = "canopy";
+  parts[1].opacity = 0.45f;
+  parts[1].double_sided = true;
+  const Rgba leaves = rgba(semantic_class_color(SemanticClass::Tree));
+  parts[1].mesh = mesh_from_height_map(canopy, [&](int, int) { return leaves; });
+  return parts;
 }
 
 }  // namespace vg

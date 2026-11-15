@@ -32,6 +32,7 @@ add_executable(vg_core_tests
   sky_test.cpp
   solar_test.cpp
   sun_map_test.cpp
+  surface_mesh_test.cpp
   terrain_test.cpp
   tsdf_volume_test.cpp
   version_test.cpp
@@ -45,6 +46,7 @@ gtest_discover_tests(vg_core_tests)
 
 if(VG_CORE_BUILD_IO)
   add_executable(vg_core_io_tests
+    foxglove_export_test.cpp
     mcap_repair_test.cpp
     protobuf_test.cpp
     session_io_test.cpp)

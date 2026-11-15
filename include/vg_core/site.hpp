@@ -15,6 +15,7 @@
 //                       before the latest one that saw it (growth, m)
 //     canopy.asc, canopy_top.asc, canopy.ply
 //                       the canopy from every visit's sky evidence together
+//     model.glb         the site in 3D (Site::model), for viewing
 //
 // The first visit defines the site frame. Each later one is registered
 // against all the visits before it, combined. Packages stay where they are;
@@ -28,14 +29,18 @@
 
 #include "vg_core/registration.hpp"
 #include "vg_core/sky.hpp"
+#include "vg_core/surface_mesh.hpp"
 
 namespace vg {
+
+class MapPackage;
 
 namespace site_file {
 inline constexpr const char* kVisits = "site.csv";
 inline constexpr const char* kCurrent = "current";
 inline constexpr const char* kVisit = "visit.asc";
 inline constexpr const char* kChanges = "changes.asc";
+inline constexpr const char* kModel = "model.glb";
 }  // namespace site_file
 
 struct SiteVisit {
@@ -65,15 +70,31 @@ class Site {
   RegistrationResult add(const std::filesystem::path& package, const RegistrationConfig& config,
                          std::ostream& log, bool force = false);
 
+  // Registers the package (as add) against every visit, without adding it:
+  // where a walk sits in the site, e.g. to check one before adding it, or to
+  // view it over the site's maps. Throws std::runtime_error if the site has no
+  // visits.
+  RegistrationResult locate(const std::filesystem::path& package, const RegistrationConfig& config,
+                            std::ostream& log) const;
+
   // Writes current/: the latest visit's view of each cell, the changes, and
   // the canopy from all visits' sky evidence.
   void make_maps(std::ostream& log, const CanopyConfig& canopy = {}) const;
+
+  // The site in 3D, from current/ (made by make_maps): the surface colored
+  // by the class seen from above ("surface"), and the canopy's underside
+  // over the terrain, see-through ("canopy"). Parts whose maps are missing
+  // are empty.
+  std::vector<MeshPart> model() const;
 
   // The package directory of a visit, resolved against the site.
   std::filesystem::path package_dir(const SiteVisit& visit) const;
 
  private:
   void save() const;
+  RegistrationResult fit(const std::filesystem::path& package, MapPackage& map,
+                         const RegistrationInput& input, const RegistrationConfig& config,
+                         std::ostream& log) const;
 
   std::filesystem::path dir_;
   std::vector<SiteVisit> visits_;
