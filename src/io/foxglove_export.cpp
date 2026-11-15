@@ -1,6 +1,7 @@
 #include "vg_core/io/foxglove_export.hpp"
 
 #include <Eigen/Geometry>
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -249,7 +250,9 @@ FoxgloveExportSummary export_foxglove(const std::filesystem::path& session,
     if (std::holds_alternative<SessionInfo>(*message)) {
       continue;
     }
-    const Timestamp t = timestamp_of(*message);
+    // Nothing goes before the walk's start: a message stamped earlier (or 0)
+    // would stretch Foxglove's timeline back to it, with nothing to show.
+    const Timestamp t = start ? std::max(*start, timestamp_of(*message)) : timestamp_of(*message);
     if (!start) {
       // Things that hold for the whole walk, at its start.
       start = t;

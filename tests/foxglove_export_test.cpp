@@ -79,6 +79,11 @@ void write_walk(const std::filesystem::path& path) {
   cam.child_frame = "cam/rgb";
   tf.transforms.push_back(cam);
   writer.write(tf);
+  vg::io::CameraCalibration calibration;
+  calibration.timestamp = 2 * kMs;
+  calibration.camera = "rgb";
+  calibration.intrinsics = {4, 3, 2.0, 2.0, 1.5, 1.0};
+  writer.write(calibration);
   for (int i = 0; i < 3; ++i) {
     const vg::Timestamp t = (100 + 100 * i) * kMs;
     vg::PoseStamped pose;
@@ -139,6 +144,8 @@ TEST(FoxgloveExport, WritesTransformsCloudsAndTheSiteModel) {
   EXPECT_EQ(topics["/cam/rgb/image"].size(), 3u);
   ASSERT_EQ(topics["/site/model"].size(), 1u);
   EXPECT_EQ(topics["/site/model"][0].schema, "foxglove.SceneUpdate");
+  ASSERT_EQ(topics["/cam/rgb/calibration"].size(), 1u);
+  EXPECT_EQ(topics["/cam/rgb/calibration"][0].time, 2 * kMs);  // Its own time, not 0.
   ASSERT_EQ(topics["/walk/path"].size(), 1u);
   EXPECT_EQ(topics["/walk/path"][0].time, 2 * kMs);  // Shown from the walk's start.
 

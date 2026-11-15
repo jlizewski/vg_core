@@ -142,6 +142,7 @@ struct SessionReader::Impl {
 
     if (kind == "calibration") {
       CameraCalibration c;
+      c.timestamp = decode_calibration_time(data);
       c.camera = camera;
       c.intrinsics = decode_calibration(data);
       camera_calibrations[camera] = c.intrinsics;

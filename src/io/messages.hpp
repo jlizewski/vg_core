@@ -27,6 +27,8 @@ std::string encode(const GpsFix& fix);
 
 SessionInfo decode_session_info(std::string_view data);
 CameraIntrinsics decode_calibration(std::string_view data);
+// The time a foxglove.CameraCalibration carries (0 if none).
+Timestamp decode_calibration_time(std::string_view data);
 StaticTransforms decode_static_transforms(std::string_view data);
 CameraImage decode_image(std::string_view data);
 

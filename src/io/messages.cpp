@@ -147,6 +147,17 @@ std::string encode_calibration(Timestamp timestamp, const std::string& frame_id,
   return w.data();
 }
 
+Timestamp decode_calibration_time(std::string_view data) {
+  ProtoReader r(data);
+  ProtoField f;
+  while (r.next(f)) {
+    if (f.number == 1 && f.type == WireType::Bytes) {
+      return parse_timestamp(f.bytes);
+    }
+  }
+  return 0;
+}
+
 CameraIntrinsics decode_calibration(std::string_view data) {
   CameraIntrinsics k;
   std::vector<double> K;

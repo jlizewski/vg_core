@@ -149,6 +149,7 @@ TEST(SessionIo, RoundTripsEveryMessageType) {
 
   const auto& cal = std::get<vg::io::CameraCalibration>(messages[1]);
   EXPECT_EQ(cal.camera, "rgb");
+  EXPECT_EQ(cal.timestamp, calibration.timestamp);
   EXPECT_EQ(cal.intrinsics.width, 640);
   EXPECT_DOUBLE_EQ(cal.intrinsics.fy, 501.0);
   EXPECT_DOUBLE_EQ(cal.intrinsics.cx, 319.5);
