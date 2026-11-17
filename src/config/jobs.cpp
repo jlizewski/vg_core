@@ -125,12 +125,17 @@ bool add_to_site(const std::filesystem::path& site_dir,
   return all_added;
 }
 
-void make_site_ground(const std::filesystem::path& site_dir, std::ostream& log) {
+void make_site_ground(const std::filesystem::path& site_dir,
+                      const std::vector<std::string>& settings, std::ostream& log) {
+  MappingConfig config;
+  ParamSet params = bind(config);
+  params.apply_args(settings);
+  config.validate();
   const Site site(site_dir);
   for (const SiteVisit& visit : site.visits()) {
     prepare_for_site(site.package_dir(visit), log);
   }
-  site.make_ground_layer(log);
+  site.make_ground_layer(log, config.ground_layer);
 }
 
 void make_site_maps(const std::filesystem::path& site_dir,

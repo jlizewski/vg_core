@@ -127,9 +127,25 @@ the ground as an entity of its own, from every visit's ground stage outputs
   marked `ground` is filled where it wasn't measured, one marked `not_ground`
   is covered; either way the ground under it is filled smoothly from the
   ground around it.
-- **Combining** walks that measured a cell: the latest wins for now, as in
-  `current/`. A robust combination (median, weighted by how much each walk
-  saw) replaces it next, so one bad walk can't make a dip.
+- **Aligning** walks first. Phone tracking drifts in height along a walk,
+  so walks registered by a turn and a shift can still sit centimeters apart,
+  or tilted by a degree or two. Each walk's ground (but the one that set the
+  site frame) is moved up or down and tilted to meet the walks before it,
+  where both measured the ground, leaving out cells far off the fit
+  (something changed there). With little overlap it's only moved up or down;
+  a narrow strip of overlap fixes no tilt across it. On the yard's three
+  walks: moved 11 and 12 cm, tilted 0.5 and 1.9 degrees; the walks went from
+  13 and 19 cm apart (median) to 6 and 9 cm.
+- **Combining** walks that measured a cell: their median, weighted by how
+  much each saw it (`ground_weight.asc`), then the mean of those within
+  `agree_within` (10 cm) of it. One bad walk can't make a dip, and walks that
+  agree average out their noise. `spread.asc` is how far the farthest walk is
+  from the result: where walks still disagree.
+- **Flicker**: on the yard, adding a newer walk changed 2 to 6 times fewer
+  cells than letting the latest walk win (by more than 20 cm: 377 instead of
+  2267, and 531 instead of 1159). Settings: the `ground_layer` section of
+  [config/mapping.yaml](../../config/mapping.yaml); `latest_wins` and
+  `align: false` give the old behavior for comparison.
 
 The same evidence and edits always give byte-identical files. Packages made
 before the ground stage wrote its per-cell outputs get them first.

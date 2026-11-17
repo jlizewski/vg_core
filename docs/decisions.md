@@ -192,11 +192,14 @@ evidence, and guidance from what's unknown makes results consistent. See
 
 The ground is a layer of its own: a smooth surface with a state per cell
 (measured, filled, covered, unknown, outside), combined robustly over all
-walks rather than taken from the latest. Other layers are placed on it, and
+walks rather than taken from the latest, after each walk's ground is aligned
+vertically (an offset and a tilt) to the walk that set the site frame. Other layers are placed on it, and
 relocalization matches against it and the feature elements.
 
 *Why:* the ground barely changes, so one bad walk shouldn't make a dip that
-comes and goes; it's what the garden is planned on. See
+comes and goes; it's what the garden is planned on. Measured: walks placed by
+registration (a turn and a shift, D9) still sat 13-19 cm apart in height and
+up to 2 degrees tilted, from tracking drift; aligned, 6-9 cm. See
 [design/guided-mapping.md](design/guided-mapping.md#layers).
 
 ## D16. User edits win over measurements

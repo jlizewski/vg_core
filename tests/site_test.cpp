@@ -22,7 +22,10 @@ namespace fs = std::filesystem;
 class SiteTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    root_ = fs::temp_directory_path() / "vg_site_test";
+    // One directory per test: ctest runs them in parallel.
+    root_ = fs::temp_directory_path() /
+            ("vg_site_test_" +
+             std::string(::testing::UnitTest::GetInstance()->current_test_info()->name()));
     fs::remove_all(root_);
     vg::test::Scene scene;
     scene.box = vg::test::Box{{0.2, -0.3, 0.0}, {0.9, 0.5, 0.4}};
@@ -115,6 +118,7 @@ TEST_F(SiteTest, MakesTheGroundLayerFromEveryVisit) {
        {vg::ground_layer_file::kEvidence, vg::ground_layer_file::kHeights,
         vg::ground_layer_file::kState, vg::ground_layer_file::kProvenance,
         vg::ground_layer_file::kObservations, vg::ground_layer_file::kSource,
+        vg::ground_layer_file::kSpread,
         vg::ground_layer_file::kInfo}) {
     EXPECT_TRUE(fs::is_regular_file(dir / name)) << name;
   }

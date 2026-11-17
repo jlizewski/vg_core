@@ -1,5 +1,6 @@
 #include "vg_core/ground_layer.hpp"
 
+#include <Eigen/Dense>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -31,6 +32,197 @@ double parse_number(const std::string& text, const std::string& what) {
     throw std::runtime_error("ground edits: bad number '" + text + "' in " + what);
   }
   return value;
+}
+
+// One walk's height for a cell, and how much to trust it.
+struct Sample {
+  float height = 0.0f;
+  float weight = 0.0f;
+  int walk = -1;
+};
+
+struct Combined {
+  float height = 0.0f;
+  int source = -1;
+  float spread = 0.0f;
+};
+
+// The samples (in walk order, oldest first) combined as config says.
+Combined combine(std::vector<Sample>& samples, const GroundLayerConfig& config) {
+  Combined out;
+  if (config.latest_wins) {
+    out.height = samples.back().height;
+    out.source = samples.back().walk;
+  } else {
+    // A walk with no weight recorded counts as one observation.
+    for (Sample& s : samples) {
+      s.weight = s.weight > 0.0f ? s.weight : 1.0f;
+    }
+    std::vector<Sample> sorted = samples;
+    std::stable_sort(sorted.begin(), sorted.end(),
+                     [](const Sample& a, const Sample& b) { return a.height < b.height; });
+    double total = 0.0;
+    for (const Sample& s : sorted) {
+      total += s.weight;
+    }
+    // The weighted median: the lowest height with half the weight at or below it.
+    double below = 0.0;
+    float median = sorted.back().height;
+    for (const Sample& s : sorted) {
+      below += s.weight;
+      if (below >= 0.5 * total) {
+        median = s.height;
+        break;
+      }
+    }
+    // The weighted mean of the walks that agree with it.
+    double sum = 0.0;
+    double weight = 0.0;
+    float heaviest = -1.0f;
+    for (const Sample& s : samples) {
+      if (std::abs(s.height - median) <= config.agree_within) {
+        sum += static_cast<double>(s.weight) * s.height;
+        weight += s.weight;
+        if (s.weight >= heaviest) {  // Ties: the later walk.
+          heaviest = s.weight;
+          out.source = s.walk;
+        }
+      }
+    }
+    out.height = static_cast<float>(sum / weight);
+  }
+  for (const Sample& s : samples) {
+    out.spread = std::max(out.spread, std::abs(s.height - out.height));
+  }
+  return out;
+}
+
+Eigen::Vector2d center_of(const HeightMap& map, int x, int y) {
+  return map.origin + Eigen::Vector2d(x + 0.5, y + 0.5) * map.cell_size;
+}
+
+double median_of(std::vector<double> v) {
+  if (v.empty()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const auto mid = v.begin() + static_cast<std::ptrdiff_t>(v.size() / 2);
+  std::nth_element(v.begin(), mid, v.end());
+  return *mid;
+}
+
+// Fewer shared cells than this: no correction at all.
+constexpr std::size_t kMinOffsetCells = 30;
+// A tilt is only fitted along directions the shared cells spread at least
+// this far across (m, standard deviation): a narrow strip can't tell a tilt
+// across it.
+constexpr double kTiltSpread = 0.5;
+// Shared cells farther off the fit than this many robust standard deviations
+// (and at least kMinOutlier m) are left out of the next round.
+constexpr double kOutlierSigmas = 2.5;
+constexpr double kMinOutlier = 0.05;
+
+// The correction (offset and tilt) that best takes differences (x, y, this
+// walk's height minus the others') to zero, leaving out outliers.
+WalkAlignment fit_alignment(const std::vector<Eigen::Vector3d>& differences,
+                            const GroundLayerConfig& config) {
+  WalkAlignment a;
+  a.cells = differences.size();
+  std::vector<double> abs_d;
+  for (const Eigen::Vector3d& d : differences) {
+    abs_d.push_back(std::abs(d.z()));
+  }
+  a.before = median_of(abs_d);
+  if (differences.size() < kMinOffsetCells) {
+    a.after = a.before;
+    return a;
+  }
+  for (const Eigen::Vector3d& d : differences) {
+    a.center += d.head<2>();
+  }
+  a.center /= static_cast<double>(differences.size());
+  const bool tilt = static_cast<int>(differences.size()) >= config.align_min_cells;
+
+  std::vector<char> keep(differences.size(), 1);
+  const auto residual = [&](const Eigen::Vector3d& d) {
+    return d.z() - a.correction_at(d.head<2>());
+  };
+  const auto fit_offset = [&]() {
+    std::vector<double> kept;
+    for (std::size_t n = 0; n < differences.size(); ++n) {
+      if (keep[n]) {
+        kept.push_back(differences[n].z() - a.slope.dot(differences[n].head<2>() - a.center));
+      }
+    }
+    a.offset = median_of(kept);
+  };
+  for (int round = 0; round < 6; ++round) {
+    if (tilt) {
+      // Least squares for offset and slope, the slope only along directions
+      // the kept cells spread at least kTiltSpread across (the overlap's
+      // principal axes): a narrow strip says nothing of a tilt across it.
+      Eigen::Matrix2d spread = Eigen::Matrix2d::Zero();
+      double n = 0.0;
+      for (std::size_t m = 0; m < differences.size(); ++m) {
+        if (keep[m]) {
+          const Eigen::Vector2d q = differences[m].head<2>() - a.center;
+          spread += q * q.transpose();
+          n += 1.0;
+        }
+      }
+      const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> axes(spread / std::max(1.0, n));
+      std::vector<Eigen::Vector2d> free;
+      for (int e = 0; e < 2; ++e) {
+        if (axes.eigenvalues()(e) >= kTiltSpread * kTiltSpread) {
+          free.push_back(axes.eigenvectors().col(e));
+        }
+      }
+      const auto unknowns = static_cast<Eigen::Index>(1 + free.size());
+      Eigen::MatrixXd A = Eigen::MatrixXd::Zero(unknowns, unknowns);
+      Eigen::VectorXd b = Eigen::VectorXd::Zero(unknowns);
+      for (std::size_t m = 0; m < differences.size(); ++m) {
+        if (!keep[m]) {
+          continue;
+        }
+        Eigen::VectorXd row(unknowns);
+        row(0) = 1.0;
+        for (std::size_t f = 0; f < free.size(); ++f) {
+          row(static_cast<Eigen::Index>(f + 1)) = free[f].dot(differences[m].head<2>() - a.center);
+        }
+        A += row * row.transpose();
+        b += row * differences[m].z();
+      }
+      const Eigen::VectorXd solution = A.ldlt().solve(b);
+      a.offset = solution(0);
+      a.slope.setZero();
+      for (std::size_t f = 0; f < free.size(); ++f) {
+        a.slope += solution(static_cast<Eigen::Index>(f + 1)) * free[f];
+      }
+    } else {
+      fit_offset();
+    }
+    std::vector<double> abs_r;
+    for (std::size_t m = 0; m < differences.size(); ++m) {
+      if (keep[m]) {
+        abs_r.push_back(std::abs(residual(differences[m])));
+      }
+    }
+    const double limit = std::max(kMinOutlier, kOutlierSigmas * 1.4826 * median_of(abs_r));
+    for (std::size_t m = 0; m < differences.size(); ++m) {
+      keep[m] = std::abs(residual(differences[m])) <= limit ? 1 : 0;
+    }
+  }
+  // Steeper than this isn't drift the ground can show: offset only.
+  if (std::atan(a.slope.norm()) > config.align_max_tilt_deg * 3.14159265358979323846 / 180.0) {
+    a.slope.setZero();
+    fit_offset();
+  }
+  a.tilted = !a.slope.isZero();
+  std::vector<double> abs_r;
+  for (const Eigen::Vector3d& d : differences) {
+    abs_r.push_back(std::abs(residual(d)));
+  }
+  a.after = median_of(abs_r);
+  return a;
 }
 
 }  // namespace
@@ -155,7 +347,6 @@ void save_ground_edits(const std::vector<GroundEdit>& edits, const std::filesyst
 
 GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
                             const std::vector<GroundEdit>& edits, const GroundLayerConfig& config) {
-  (void)config;  // One way to combine so far: the latest walk.
   GroundLayer layer;
   HeightMap& map = layer.heights;
 
@@ -193,67 +384,130 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
   layer.provenance.assign(cells, Provenance::None);
   layer.observations.assign(cells, 0);
   layer.source.assign(cells, -1);
+  layer.spread.assign(cells, kNaN);
 
-  std::vector<MapTransform> map_from_site;
-  for (const WalkGround& w : walks) {
-    map_from_site.push_back(w.site_from_map.inverse());
-  }
-  const auto walk_cell = [&](std::size_t k, const Eigen::Vector2d& site) -> std::ptrdiff_t {
-    const HeightMap& h = walks[k].heights;
+  // Each walk on the site grid: what it knew of each cell, the height there
+  // in the site frame, and how much it saw it.
+  struct OnGrid {
+    std::vector<std::uint8_t> state;
+    std::vector<float> height;
+    std::vector<float> weight;
+  };
+  std::vector<OnGrid> grid(walks.size());
+  for (std::size_t k = 0; k < walks.size(); ++k) {
+    const WalkGround& w = walks[k];
+    OnGrid& g = grid[k];
+    g.state.assign(cells, 0);
+    g.height.assign(cells, kNaN);
+    g.weight.assign(cells, 0.0f);
+    const HeightMap& h = w.heights;
     if (h.width == 0) {
-      return -1;
+      continue;
     }
-    const Eigen::Vector2d f = (map_from_site[k].apply_xy(site) - h.origin) / h.cell_size;
-    const int x = static_cast<int>(std::floor(f.x()));
-    const int y = static_cast<int>(std::floor(f.y()));
-    if (x < 0 || y < 0 || x >= h.width || y >= h.height) {
-      return -1;
+    const MapTransform map_from_site = w.site_from_map.inverse();
+    const auto z = static_cast<float>(w.site_from_map.translation.z());
+    for (int y = 0; y < map.height; ++y) {
+      for (int x = 0; x < map.width; ++x) {
+        const Eigen::Vector2d f =
+            (map_from_site.apply_xy(center_of(map, x, y)) - h.origin) / h.cell_size;
+        const int mx = static_cast<int>(std::floor(f.x()));
+        const int my = static_cast<int>(std::floor(f.y()));
+        if (mx < 0 || my < 0 || mx >= h.width || my >= h.height) {
+          continue;
+        }
+        const std::size_t at = static_cast<std::size_t>(my) * static_cast<std::size_t>(h.width) +
+                               static_cast<std::size_t>(mx);
+        if (w.state[at] == 0 || w.state[at] > 4) {
+          continue;
+        }
+        const std::size_t i = layer.index(x, y);
+        g.state[i] = w.state[at];
+        g.height[i] = h.heights[at] + z;
+        g.weight[i] = w.weight[at];
+      }
     }
-    return static_cast<std::ptrdiff_t>(y) * h.width + x;
+  }
+  const auto cell_center = [&](std::size_t i) {
+    return center_of(map, static_cast<int>(i % static_cast<std::size_t>(map.width)),
+                     static_cast<int>(i / static_cast<std::size_t>(map.width)));
   };
 
-  for (int y = 0; y < map.height; ++y) {
-    for (int x = 0; x < map.width; ++x) {
-      const std::size_t i = layer.index(x, y);
-      const Eigen::Vector2d center = map.origin + Eigen::Vector2d(x + 0.5, y + 0.5) * cell;
-      // The latest walk (they're oldest first) in each state, and its height.
-      std::array<int, 5> latest;
-      latest.fill(-1);
-      std::array<float, 5> height{};
-      for (std::size_t k = 0; k < walks.size(); ++k) {
-        const std::ptrdiff_t c = walk_cell(k, center);
-        if (c < 0) {
-          continue;
-        }
-        const std::uint8_t s = walks[k].state[static_cast<std::size_t>(c)];
-        if (s == 0 || s > 4) {
-          continue;
-        }
-        latest[s] = static_cast<int>(k);
-        height[s] = walks[k].heights.heights[static_cast<std::size_t>(c)] +
-                    static_cast<float>(walks[k].site_from_map.translation.z());
-        if (s == static_cast<std::uint8_t>(GroundCell::Measured)) {
-          ++layer.observations[i];
+  // Vertical alignment: the walk that sets the site frame stays; each other
+  // walk's ground, oldest first, is moved to meet the walks aligned before it,
+  // combined, where both measured the ground.
+  constexpr auto kMeasured = static_cast<std::uint8_t>(GroundCell::Measured);
+  layer.alignment.assign(walks.size(), WalkAlignment{});
+  std::vector<std::size_t> order;
+  for (std::size_t k = 0; k < walks.size(); ++k) {
+    if (walks[k].sets_frame) {
+      order.insert(order.begin(), k);
+    } else {
+      order.push_back(k);
+    }
+  }
+  std::vector<Sample> before;
+  for (std::size_t o = 1; config.align && o < order.size(); ++o) {
+    const std::size_t k = order[o];
+    std::vector<Eigen::Vector3d> differences;  // x, y, this walk minus the others.
+    for (std::size_t i = 0; i < cells; ++i) {
+      if (grid[k].state[i] != kMeasured) {
+        continue;
+      }
+      before.clear();
+      for (std::size_t p = 0; p < o; ++p) {
+        const std::size_t j = order[p];
+        if (grid[j].state[i] == kMeasured) {
+          before.push_back({grid[j].height[i], grid[j].weight[i], static_cast<int>(j)});
         }
       }
-      const auto take = [&](GroundCell from, GroundState to) {
-        const auto s = static_cast<std::size_t>(from);
-        if (latest[s] < 0) {
-          return false;
-        }
-        layer.state[i] = to;
-        layer.provenance[i] =
-            to == GroundState::Measured ? Provenance::Measured : Provenance::Inferred;
-        map.heights[i] = height[s];
-        layer.source[i] = latest[s];
-        return true;
-      };
-      if (!take(GroundCell::Measured, GroundState::Measured) &&
-          !take(GroundCell::UnderObject, GroundState::Covered) &&
-          !take(GroundCell::SmallHole, GroundState::Filled) &&
-          latest[static_cast<std::size_t>(GroundCell::LargeHole)] >= 0) {
-        layer.state[i] = GroundState::Unknown;
+      if (!before.empty()) {
+        const Eigen::Vector2d c = cell_center(i);
+        differences.emplace_back(c.x(), c.y(), grid[k].height[i] - combine(before, config).height);
       }
+    }
+    const WalkAlignment a = fit_alignment(differences, config);
+    layer.alignment[k] = a;
+    for (std::size_t i = 0; i < cells; ++i) {
+      if (!std::isnan(grid[k].height[i])) {
+        grid[k].height[i] -= static_cast<float>(a.correction_at(cell_center(i)));
+      }
+    }
+  }
+
+  std::array<std::vector<Sample>, 5> samples;  // By GroundCell.
+  for (std::size_t i = 0; i < cells; ++i) {
+    // Each walk's height for the cell, by what that walk knew of it.
+    for (auto& list : samples) {
+      list.clear();
+    }
+    for (std::size_t k = 0; k < walks.size(); ++k) {
+      const std::uint8_t s = grid[k].state[i];
+      if (s != 0) {
+        samples[s].push_back({grid[k].height[i], grid[k].weight[i], static_cast<int>(k)});
+      }
+    }
+    layer.observations[i] = static_cast<std::uint16_t>(samples[kMeasured].size());
+    // Measured by any walk beats patched under an object, which beats a
+    // small patched hole: each from the walks that knew it that way.
+    const auto take = [&](GroundCell from, GroundState to) {
+      std::vector<Sample>& list = samples[static_cast<std::size_t>(from)];
+      if (list.empty()) {
+        return false;
+      }
+      const Combined c = combine(list, config);
+      layer.state[i] = to;
+      layer.provenance[i] =
+          to == GroundState::Measured ? Provenance::Measured : Provenance::Inferred;
+      map.heights[i] = c.height;
+      layer.source[i] = c.source;
+      layer.spread[i] = c.spread;
+      return true;
+    };
+    if (!take(GroundCell::Measured, GroundState::Measured) &&
+        !take(GroundCell::UnderObject, GroundState::Covered) &&
+        !take(GroundCell::SmallHole, GroundState::Filled) &&
+        !samples[static_cast<std::size_t>(GroundCell::LargeHole)].empty()) {
+      layer.state[i] = GroundState::Unknown;
     }
   }
 
@@ -287,6 +541,7 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
         layer.provenance[i] = Provenance::Edited;
         map.heights[i] = kNaN;
         layer.source[i] = -1;
+        layer.spread[i] = kNaN;
       }
     }
   }

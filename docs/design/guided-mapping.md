@@ -116,7 +116,7 @@ Every layer has the same parts:
 | Layer | Shape | Evidence | Update policy |
 | --- | --- | --- | --- |
 | **Boundary** | a polygon in the site frame | the boundary walk's path, pushed out to the edge it follows; edits | edits only, after step 1 |
-| **Ground** | a height grid with a **state per cell**; a smooth mesh from it | per-walk ground heights with their quality; hole decisions; edits | robust over all walks (median); settles, doesn't flicker |
+| **Ground** | a height grid with a **state per cell**; a smooth mesh from it | per-walk ground heights with their quality; hole decisions; edits | each walk aligned vertically (offset + tilt) to the frame's walk, then robust over all walks (median); settles, doesn't flicker |
 | **Features** | point and line elements: trunks, posts, bed edges, wall and fence lines, footprint outlines | per-walk detections | persistent; an element seen missing several times is retired |
 | **Structures** | footprint polygon + height + roofline profile per structure; near or far | footprints from ground holes, roofline and edge traces from stations; edits | persistent until edited or re-traced |
 | **Skyline** | horizon elevation by azimuth, per station | station panoramas (sky boundary per direction) | rarely changes; newest station data per direction |

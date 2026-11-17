@@ -515,6 +515,7 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
     WalkGround walk = load_walk_ground(package_dir(v));
     walk.recorded = v.recorded;
     walk.site_from_map = v.site_from_map;
+    walk.sets_frame = !v.fit.has_value();  // Only the first visit added has no fit.
     walks.push_back(std::move(walk));
   }
   const std::vector<GroundEdit> edits = load_ground_edits(dir / ground_layer_file::kEdits);
@@ -538,19 +539,37 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
   save_height_map(layer_grid(layer.heights, layer.source,
                              [](int k) { return k < 0 ? kNone : static_cast<float>(k + 1); }),
                   dir / ground_layer_file::kSource);
+  save_height_map(layer_grid(layer.heights, layer.spread, [](float s) { return s; }),
+                  dir / ground_layer_file::kSpread);
 
-  // The evidence used: each walk, and where it was placed.
+  // The evidence used: each walk, where it was placed, and how its ground was
+  // aligned to the walks before it.
   {
     std::ofstream out(dir / ground_layer_file::kEvidence);
     out.imbue(std::locale::classic());
     out.precision(10);
-    out << "id,package,recorded,yaw_deg,x,y,z\n";
+    out << "id,package,recorded,yaw_deg,x,y,z,align_cells,align_offset_m,align_center_x,"
+           "align_center_y,align_slope_x,align_slope_y,align_before_m,align_after_m\n";
     for (std::size_t k = 0; k < walks.size(); ++k) {
       const MapTransform& t = walks[k].site_from_map;
+      const WalkAlignment& a = layer.alignment[k];
       out << k + 1 << ',' << visits_[k].package.generic_string() << ',' << walks[k].recorded
           << ',' << t.yaw * 180.0 / kPi << ',' << t.translation.x() << ',' << t.translation.y()
-          << ',' << t.translation.z() << '\n';
+          << ',' << t.translation.z() << ',' << a.cells << ',' << a.offset << ','
+          << a.center.x() << ',' << a.center.y() << ',' << a.slope.x() << ',' << a.slope.y()
+          << ',' << a.before << ',' << a.after << '\n';
     }
+  }
+  for (std::size_t k = 1; k < walks.size(); ++k) {
+    const WalkAlignment& a = layer.alignment[k];
+    log << "ground layer: " << walks[k].id << ": ";
+    if (a.cells == 0) {
+      log << "no ground shared with the walks before it" << std::endl;
+      continue;
+    }
+    log << "moved " << 100.0 * a.offset << " cm, tilted " << a.tilt_deg() << " deg, from "
+        << a.cells << " shared cells; apart " << 100.0 * a.before << " cm -> "
+        << 100.0 * a.after << " cm (median)" << std::endl;
   }
 
   // How it was made. No timestamps: the same inputs give the same files.
@@ -562,7 +581,12 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
     std::ofstream out(dir / ground_layer_file::kInfo);
     out.imbue(std::locale::classic());
     out << "{\n  \"layer\": \"ground\",\n  \"vg_core_version\": \"" << version_string()
-        << "\",\n  \"combine\": \"latest\",\n  \"cell_size_m\": " << layer.heights.cell_size
+        << "\",\n  \"combine\": \"" << (config.latest_wins ? "latest" : "robust")
+        << "\",\n  \"agree_within_m\": " << config.agree_within
+        << ",\n  \"align\": " << (config.align ? "true" : "false")
+        << ",\n  \"align_min_cells\": " << config.align_min_cells
+        << ",\n  \"align_max_tilt_deg\": " << config.align_max_tilt_deg
+        << ",\n  \"cell_size_m\": " << layer.heights.cell_size
         << ",\n  \"walks\": " << walks.size() << ",\n  \"edits\": [";
     for (std::size_t e = 0; e < edits.size(); ++e) {
       out << (e > 0 ? ", " : "") << '"' << edits[e].id << '"';

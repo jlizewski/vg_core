@@ -7,7 +7,7 @@
 //
 // ground builds the site's ground layer (layers/ground/, see
 // vg_core/ground_layer.hpp): every visit's ground combined, with the edits in
-// layers/ground/edits.csv applied.
+// layers/ground/edits.csv applied (settings: the ground_layer section).
 //
 // add registers each package against the visits so far (the first one sets
 // the site's frame) and remakes current/. A package missing its terrain maps
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     } else if (command == "maps") {
       vg::config::make_site_maps(site_dir, settings, std::cout);
     } else if (command == "ground") {
-      vg::config::make_site_ground(site_dir, std::cout);
+      vg::config::make_site_ground(site_dir, settings, std::cout);
     }
     list(vg::Site(site_dir));
     return all_added ? 0 : 1;

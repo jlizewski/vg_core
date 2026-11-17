@@ -61,8 +61,14 @@ GroundEdit edit(GroundEdit::Kind kind, double x0, double x1, const std::string& 
   return e;
 }
 
+vg::GroundLayerConfig latest_wins() {
+  vg::GroundLayerConfig config;
+  config.latest_wins = true;
+  return config;
+}
+
 TEST(GroundLayer, CombinesWalksTheLatestMeasuredWins) {
-  const vg::GroundLayer layer = vg::estimate_ground(two_walks(), {});
+  const vg::GroundLayer layer = vg::estimate_ground(two_walks(), {}, latest_wins());
   ASSERT_EQ(layer.heights.width, 6);
   ASSERT_EQ(layer.heights.height, 1);
   const auto& h = layer.heights.heights;
@@ -77,6 +83,8 @@ TEST(GroundLayer, CombinesWalksTheLatestMeasuredWins) {
   EXPECT_EQ(layer.source[1], 1);
   EXPECT_EQ(layer.observations[1], 2);
   EXPECT_EQ(layer.provenance[1], Provenance::Measured);
+  EXPECT_FLOAT_EQ(layer.spread[1], 1.5f);  // a, 1.5 m below.
+  EXPECT_FLOAT_EQ(layer.spread[0], 0.0f);  // One walk.
 
   EXPECT_EQ(layer.state[2], GroundState::Covered);  // Under an object beats a small hole.
   EXPECT_FLOAT_EQ(h[2], 1.2f);
@@ -93,6 +101,154 @@ TEST(GroundLayer, CombinesWalksTheLatestMeasuredWins) {
   EXPECT_EQ(layer.state[5], GroundState::Outside);
 }
 
+// Walks over the same two cells (heights per walk), with weights.
+std::vector<vg::WalkGround> same_place(const std::vector<std::pair<float, float>>& height_weight) {
+  std::vector<vg::WalkGround> walks;
+  for (std::size_t k = 0; k < height_weight.size(); ++k) {
+    const auto [h, w] = height_weight[k];
+    walks.push_back(
+        walk("w" + std::to_string(k), {GroundCell::Measured, GroundCell::Measured}, {h, h}));
+    walks.back().weight = {w, w};
+  }
+  return walks;
+}
+
+TEST(GroundLayer, OneBadWalkDoesntMakeADip) {
+  // Two walks agree; the latest reads 30 cm low (a bad reading).
+  const auto walks = same_place({{1.00f, 1.0f}, {1.02f, 1.0f}, {0.70f, 1.0f}});
+  const vg::GroundLayer robust = vg::estimate_ground(walks, {});
+  EXPECT_NEAR(robust.heights.heights[0], 1.01f, 1e-5);  // The two that agree, averaged.
+  EXPECT_NEAR(robust.spread[0], 0.31f, 1e-5);           // The bad walk shows as spread.
+  EXPECT_EQ(robust.observations[0], 3);
+  const vg::GroundLayer latest = vg::estimate_ground(walks, {}, latest_wins());
+  EXPECT_FLOAT_EQ(latest.heights.heights[0], 0.70f);  // The dip.
+}
+
+TEST(GroundLayer, TheBetterSeenWalkCountsMore) {
+  // Two walks disagree: the one that saw the cell ten times as much wins.
+  const vg::GroundLayer layer = vg::estimate_ground(same_place({{1.0f, 10.0f}, {1.5f, 1.0f}}), {});
+  EXPECT_FLOAT_EQ(layer.heights.heights[0], 1.0f);
+  EXPECT_EQ(layer.source[0], 0);
+  EXPECT_FLOAT_EQ(layer.spread[0], 0.5f);
+}
+
+TEST(GroundLayer, WalksThatAgreeAreAveragedByWeight) {
+  const vg::GroundLayer layer = vg::estimate_ground(same_place({{1.00f, 1.0f}, {1.06f, 3.0f}}), {});
+  EXPECT_NEAR(layer.heights.heights[0], (1.00f + 3 * 1.06f) / 4, 1e-5);
+  EXPECT_EQ(layer.source[0], 1);  // The heavier one.
+  vg::GroundLayerConfig strict;
+  strict.agree_within = 0.05;  // Now they don't agree: the median walk alone.
+  EXPECT_FLOAT_EQ(vg::estimate_ground(same_place({{1.00f, 1.0f}, {1.06f, 3.0f}}), {}, strict)
+                      .heights.heights[0],
+                  1.06f);
+}
+
+// A walk measuring an n x n grid of 0.2 m cells, ground at height(x, y).
+template <typename F>
+vg::WalkGround grid_walk(const std::string& id, int n, F height) {
+  vg::WalkGround w;
+  w.id = id;
+  w.heights.cell_size = 0.2;
+  w.heights.width = n;
+  w.heights.height = n;
+  for (int y = 0; y < n; ++y) {
+    for (int x = 0; x < n; ++x) {
+      w.heights.heights.push_back(height((x + 0.5) * 0.2, (y + 0.5) * 0.2));
+      w.state.push_back(static_cast<std::uint8_t>(GroundCell::Measured));
+      w.weight.push_back(1.0f);
+    }
+  }
+  return w;
+}
+
+float slope_ground(double x, double y) { return static_cast<float>(0.1 * x - 0.03 * y); }
+
+TEST(GroundLayer, AlignsAWalkThatSitsHighAndTilted) {
+  // The second walk reads the same 6 x 6 m slope 15 cm high at its middle and
+  // tilted 2 cm per meter along x, with 40 cells of plants 0.5 m tall.
+  const vg::WalkGround a = grid_walk("a", 30, slope_ground);
+  const vg::WalkGround b = grid_walk("b", 30, [](double x, double y) {
+    const bool plant = x > 1.0 && x < 1.8 && y > 1.0 && y < 3.0;
+    return slope_ground(x, y) + static_cast<float>(0.15 + 0.02 * (x - 3.0)) + (plant ? 0.5f : 0.0f);
+  });
+  const vg::GroundLayer layer = vg::estimate_ground({a, b}, {});
+
+  const vg::WalkAlignment& fit = layer.alignment[1];
+  EXPECT_EQ(fit.cells, 900u);
+  EXPECT_TRUE(fit.tilted);
+  EXPECT_NEAR(fit.correction_at({3.0, 3.0}), 0.15, 0.005);
+  EXPECT_NEAR(fit.slope.x(), 0.02, 0.002);
+  EXPECT_NEAR(fit.slope.y(), 0.0, 0.002);
+  EXPECT_GT(fit.before, 0.1);
+  EXPECT_LT(fit.after, 0.005);
+  EXPECT_DOUBLE_EQ(layer.alignment[0].offset, 0.0);  // The first walk stays.
+
+  // Aligned, the walks agree (but at the plants): the layer is the first
+  // walk's ground.
+  for (int y = 0; y < 30; ++y) {
+    for (int x = 0; x < 30; ++x) {
+      const std::size_t i = layer.index(x, y);
+      EXPECT_NEAR(layer.heights.heights[i], slope_ground((x + 0.5) * 0.2, (y + 0.5) * 0.2), 0.01)
+          << x << "," << y;
+    }
+  }
+
+  // Without alignment, the walks don't agree: the median walk alone, 15 cm off at the middle.
+  vg::GroundLayerConfig off;
+  off.align = false;
+  const vg::GroundLayer unaligned = vg::estimate_ground({a, b}, {}, off);
+  EXPECT_GT(unaligned.spread[layer.index(15, 15)], 0.1f);
+}
+
+TEST(GroundLayer, LittleOverlapOnlyMovesAWalkUpOrDown) {
+  // 100 shared cells: below align_min_cells, so no tilt.
+  const vg::WalkGround a = grid_walk("a", 10, slope_ground);
+  const vg::WalkGround b = grid_walk("b", 10, [](double x, double y) {
+    return slope_ground(x, y) + static_cast<float>(0.1 + 0.02 * x);
+  });
+  const vg::GroundLayer layer = vg::estimate_ground({a, b}, {});
+  EXPECT_FALSE(layer.alignment[1].tilted);
+  EXPECT_NEAR(layer.alignment[1].offset, 0.12, 0.02);  // The median shift.
+}
+
+TEST(GroundLayer, RefusesASteepTilt) {
+  const vg::WalkGround a = grid_walk("a", 30, slope_ground);
+  const vg::WalkGround b = grid_walk("b", 30, [](double x, double y) {
+    return slope_ground(x, y) + static_cast<float>(0.2 * (x - 3.0));  // 11 degrees.
+  });
+  const vg::GroundLayer layer = vg::estimate_ground({a, b}, {});
+  EXPECT_FALSE(layer.alignment[1].tilted);
+}
+
+TEST(GroundLayer, ALaterWalkLeavesEarlierAlignmentsAlone) {
+  const vg::WalkGround a = grid_walk("a", 30, slope_ground);
+  const vg::WalkGround b = grid_walk("b", 30, [](double x, double y) {
+    return slope_ground(x, y) + static_cast<float>(0.1 + 0.01 * x);
+  });
+  const vg::WalkGround c = grid_walk("c", 30, [](double x, double y) {
+    return slope_ground(x, y) - static_cast<float>(0.2 + 0.01 * y);
+  });
+  const vg::GroundLayer two = vg::estimate_ground({a, b}, {});
+  const vg::GroundLayer three = vg::estimate_ground({a, b, c}, {});
+  EXPECT_DOUBLE_EQ(three.alignment[1].offset, two.alignment[1].offset);
+  EXPECT_EQ(three.alignment[1].slope, two.alignment[1].slope);
+  EXPECT_NEAR(three.alignment[2].correction_at({3.0, 3.0}), -0.23, 0.005);
+  EXPECT_NEAR(three.heights.heights[three.index(15, 15)], slope_ground(3.1, 3.1), 0.01);
+}
+
+TEST(GroundLayer, AlignsToTheWalkThatSetsTheFrameNotTheOldest) {
+  // An older recording added after the site was set up: it's moved to meet
+  // the frame's walk, not the other way round.
+  const vg::WalkGround older =
+      grid_walk("older", 30, [](double x, double y) { return slope_ground(x, y) + 0.12f; });
+  vg::WalkGround frame = grid_walk("frame", 30, slope_ground);
+  frame.sets_frame = true;
+  const vg::GroundLayer layer = vg::estimate_ground({older, frame}, {});
+  EXPECT_NEAR(layer.alignment[0].offset, 0.12, 0.005);
+  EXPECT_DOUBLE_EQ(layer.alignment[1].offset, 0.0);
+  EXPECT_NEAR(layer.heights.heights[layer.index(15, 15)], slope_ground(3.1, 3.1), 0.005);
+}
+
 TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {
   const std::vector<GroundEdit> edits = {
       edit(GroundEdit::Kind::NotGround, 0.0, 1.0, "deck"),  // Over measured cell 0.
@@ -100,12 +256,14 @@ TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {
       edit(GroundEdit::Kind::Ground, 1.0, 2.0, "seen"),     // Over measured cell 1: no change.
   };
   const vg::GroundLayer layer = vg::estimate_ground(two_walks(), edits);
+  const vg::GroundLayer unedited = vg::estimate_ground(two_walks(), {});
   const auto& h = layer.heights.heights;
 
   EXPECT_EQ(layer.state[0], GroundState::Covered);
   EXPECT_EQ(layer.provenance[0], Provenance::Edited);
   EXPECT_EQ(layer.source[0], -1);
-  EXPECT_NEAR(h[0], 2.5f, 1e-4);  // Filled from the ground beside it, not the deck's top.
+  EXPECT_TRUE(std::isnan(layer.spread[0]));
+  EXPECT_NEAR(h[0], h[1], 1e-4);  // Filled from the ground beside it, not the deck's top.
 
   EXPECT_EQ(layer.state[4], GroundState::Filled);
   EXPECT_EQ(layer.provenance[4], Provenance::Edited);
@@ -113,7 +271,7 @@ TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {
 
   EXPECT_EQ(layer.state[1], GroundState::Measured);
   EXPECT_EQ(layer.provenance[1], Provenance::Measured);
-  EXPECT_FLOAT_EQ(h[1], 2.5f);
+  EXPECT_FLOAT_EQ(h[1], unedited.heights.heights[1]);
 }
 
 TEST(GroundLayer, SameInputsSameLayer) {

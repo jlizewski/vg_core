@@ -407,6 +407,24 @@ ParamSet bind(MappingConfig& c) {
   p.add("site.min_inliers", reg.min_inliers,
         "Share of that overlap that must lie within 0.3 m once aligned.");
 
+  p.section("ground_layer",
+            "The site's ground from every walk (vg site ground, layers/ground/): where several "
+            "walks measured a cell, their weighted median, then the mean of those agreeing with "
+            "it.");
+  p.add("ground_layer.agree_within", c.ground_layer.agree_within,
+        "Walks within this of the median (m) are averaged into the cell's height; the rest are "
+        "left out.");
+  p.add("ground_layer.align", c.ground_layer.align,
+        "Before combining, move each walk's ground up or down and tilt it to meet the walks "
+        "before it, where both measured the ground (tracking drifts in height along a walk).");
+  p.add("ground_layer.align_min_cells", c.ground_layer.align_min_cells,
+        "Shared cells a walk needs for a tilt; with fewer, it's only moved up or down.");
+  p.add("ground_layer.align_max_tilt_deg", c.ground_layer.align_max_tilt_deg,
+        "A tilt steeper than this (degrees) is refused: the walk is only moved up or down.");
+  p.add("ground_layer.latest_wins", c.ground_layer.latest_wins,
+        "Take the latest walk that measured a cell instead, as the site's current maps do "
+        "(for comparison).");
+
   p.section("layers", "Diagnostic: where a second surface sits over the first (ghosts).");
   p.add("layers.min_gap_voxels", c.layers.min_gap_voxels,
         "Runs of voxels separated by fewer empty voxels than this count as one surface.");

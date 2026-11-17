@@ -18,12 +18,15 @@
 //   state.asc         GroundState per cell
 //   provenance.asc    Provenance per cell
 //   observations.asc  how many walks measured the cell
-//   source.asc        which evidence row (1-based) the height came from
+//   source.asc        which evidence row (1-based) counts most toward the height
+//   spread.asc        how far the farthest walk is from the height (m)
 //   layer.json        how it was made: estimator, settings, inputs, counts
 
 #include <Eigen/Core>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -41,6 +44,7 @@ inline constexpr const char* kState = "state.asc";
 inline constexpr const char* kProvenance = "provenance.asc";
 inline constexpr const char* kObservations = "observations.asc";
 inline constexpr const char* kSource = "source.asc";
+inline constexpr const char* kSpread = "spread.asc";
 inline constexpr const char* kInfo = "layer.json";
 }  // namespace ground_layer_file
 
@@ -67,6 +71,9 @@ enum class Provenance : std::uint8_t {
 struct WalkGround {
   std::string id;  // Names it in evidence.csv, e.g. the package's name.
   std::string recorded;
+  // The walk whose frame is the site's (the first added, D9): its ground is
+  // the height every other walk is aligned to. Without one, the oldest.
+  bool sets_frame = false;
   MapTransform site_from_map;
   HeightMap heights;                // ground.asc: patched where not measured.
   std::vector<std::uint8_t> state;  // ground_state.asc: GroundCell, 0 where none.
@@ -97,11 +104,48 @@ std::vector<GroundEdit> load_ground_edits(const std::filesystem::path& path);
 void save_ground_edits(const std::vector<GroundEdit>& edits, const std::filesystem::path& path);
 
 struct GroundLayerConfig {
-  // How walks that measured a cell are combined.
-  enum class Combine : std::uint8_t {
-    Latest,  // The latest walk that measured it (as the site's current maps).
-  };
-  Combine combine = Combine::Latest;
+  // How the walks that measured a cell (or patched it the same way) are
+  // combined. Robustly, by default: the weighted median of their heights
+  // (weighted by how much each saw the cell, WalkGround::weight), then the
+  // weighted mean of the walks within agree_within of it. One walk that's off
+  // (a bad reading, a misplaced walk) can't move the result, and walks that
+  // agree average out their noise. With two walks it's the better-seen one,
+  // or their mean where they agree.
+  //
+  // latest_wins instead takes the latest walk that measured the cell, as the
+  // site's current maps do; kept for comparison.
+  bool latest_wins = false;
+  double agree_within = 0.10;  // Meters.
+
+  // Before combining, each walk's ground (but the one that sets the site
+  // frame, WalkGround::sets_frame) is moved up or down and tilted to meet the
+  // walks before it, where
+  // both measured the ground: phone tracking drifts in height along a walk,
+  // so walks placed by a turn and a shift (registration) can still sit
+  // centimeters apart, or tilted by a degree or two. The fit leaves out
+  // cells far off it (something changed there). With fewer than
+  // align_min_cells shared cells it's an offset only; a tilt steeper than
+  // align_max_tilt_deg is refused (offset only).
+  bool align = true;
+  int align_min_cells = 200;
+  double align_max_tilt_deg = 5.0;
+};
+
+// How a walk's ground was moved to meet the walks before it: its height at p
+// is lowered by correction_at(p).
+struct WalkAlignment {
+  double offset = 0.0;  // Meters, at center.
+  Eigen::Vector2d center = Eigen::Vector2d::Zero();
+  Eigen::Vector2d slope = Eigen::Vector2d::Zero();  // Rise per meter in x and y.
+  bool tilted = false;
+  // The cells it shared with the walks before it, and the median distance
+  // between them there before and after the correction (m; NaN for none).
+  std::size_t cells = 0;
+  double before = std::numeric_limits<double>::quiet_NaN();
+  double after = std::numeric_limits<double>::quiet_NaN();
+
+  double correction_at(const Eigen::Vector2d& p) const { return offset + slope.dot(p - center); }
+  double tilt_deg() const { return std::atan(slope.norm()) * 180.0 / 3.14159265358979323846; }
 };
 
 struct GroundLayer {
@@ -112,7 +156,15 @@ struct GroundLayer {
   std::vector<GroundState> state;
   std::vector<Provenance> provenance;
   std::vector<std::uint16_t> observations;  // Walks that measured the cell.
-  std::vector<int> source;                  // Index of the walk the height came from; -1.
+  // The walk counting most toward the height (the latest, with latest_wins);
+  // -1 for none.
+  std::vector<int> source;
+  // How far the farthest walk that measured (or patched) the cell is from the
+  // result, in meters: 0 for one walk, large where walks disagree (something
+  // changed, or a walk is misplaced). NaN where no walk gave a height.
+  std::vector<float> spread;
+  // Per walk, how its ground was aligned (zero for the walk that sets the frame).
+  std::vector<WalkAlignment> alignment;
 
   std::size_t index(int x, int y) const {
     return static_cast<std::size_t>(y) * static_cast<std::size_t>(heights.width) +

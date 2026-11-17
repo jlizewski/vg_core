@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "vg_core/config/params.hpp"
+#include "vg_core/ground_layer.hpp"
 #include "vg_core/ground_segmentation.hpp"
 #include "vg_core/io/map_build.hpp"
 #include "vg_core/map_package.hpp"
@@ -70,6 +71,8 @@ struct MappingConfig {
 
   // site: registering walks into a site (vg site, site.hpp).
   RegistrationConfig registration;
+  // ground_layer: the site's ground from every walk (vg site ground).
+  GroundLayerConfig ground_layer;
 
   // Derived stages vg replay runs after the build, in order.
   std::vector<std::string> pipeline;
