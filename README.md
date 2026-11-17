@@ -153,7 +153,11 @@ garden/
   surface.asc      height of the highest surface per cell (m)
   ground.asc       height of the bare ground per cell, holes under objects patched (m)
   ground_patched.asc  1 where ground.asc was patched rather than seen (diagnostic)
+  ground_state.asc    per cell: measured, under an object, small or large unseen hole
+  ground_weight.asc   how much the measured ground was seen
+  ground_object.asc   the largest object over each cell (an id in objects.csv)
   objects.ply      everything on or over the ground
+  objects.csv      each object: class, height above the ground, bounds, footprint
   terrain.asc      smooth contour of the ground, from the seen ground and the walk (m)
   features.asc     height of the surface above the terrain: beds, mounds, plants (m)
   sky.vgs          where sky was seen, and blocked beyond depth (when labeled)

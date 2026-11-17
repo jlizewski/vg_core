@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,11 +78,29 @@ TEST_F(MapPackageTest, WritesEveryMap) {
   package.make_ground();
   ASSERT_TRUE(package.make_sun(quick_sun()));
 
-  for (const char* name : {file::kMap, file::kVoxels, file::kSurface, file::kGround,
-                           file::kObjects, file::kSunHours, file::kSunEnergy, file::kManifest}) {
+  for (const char* name :
+       {file::kMap, file::kVoxels, file::kSurface, file::kGround, file::kGroundState,
+        file::kGroundWeight, file::kGroundObject, file::kObjects, file::kObjectsTable,
+        file::kSunHours, file::kSunEnergy, file::kManifest}) {
     EXPECT_TRUE(fs::is_regular_file(dir_ / name)) << name;
   }
   const auto ground = vg::load_height_map(dir_ / file::kGround);
+  // What's known of each cell, on the ground map's grid: the bed's ground is
+  // measured around it and patched under it; its object is in objects.csv.
+  const auto state = vg::load_height_map(dir_ / file::kGroundState);
+  ASSERT_EQ(state.width, ground.width);
+  ASSERT_EQ(state.height, ground.height);
+  std::set<int> states;
+  for (const float s : state.heights) {
+    if (!std::isnan(s)) {
+      states.insert(static_cast<int>(s));
+    }
+  }
+  EXPECT_EQ(states.count(static_cast<int>(vg::GroundCell::Measured)), 1u);
+  EXPECT_EQ(states.count(static_cast<int>(vg::GroundCell::UnderObject)), 1u);
+  const std::string objects = read_file(dir_ / file::kObjectsTable);
+  EXPECT_EQ(objects.rfind("id,voxels,grounded,class,", 0), 0u) << objects;
+  EXPECT_NE(objects.find("\n1,"), std::string::npos) << objects;
   EXPECT_DOUBLE_EQ(ground.cell_size, 0.1524);
   EXPECT_DOUBLE_EQ(vg::load_height_map(dir_ / file::kSurface).cell_size, 0.1524);
   EXPECT_EQ(vg::load_height_map(dir_ / file::kSunHours).width, ground.width);

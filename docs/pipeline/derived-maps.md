@@ -64,6 +64,17 @@ Then:
   unseen holes enclosed by ground are filled up to `max_hole_area` (1 m²).
   Filling solves Laplace's equation (each cell the mean of its neighbors), so
   the patch is smooth and meets the ground around it.
+- **What's known of each cell.** For combining walks into a site's ground
+  ([design/guided-mapping.md](../design/guided-mapping.md#layers)), the stage
+  also records per cell whether the ground was **measured**, patched **under
+  an object**, patched as a **small hole**, or is an enclosed unseen hole
+  **too large to patch** (`ground_state.asc`); how much the measured ground
+  was seen (`ground_weight.asc`: the fused weight of its voxels, which counts
+  observations and, with `quality_weights`, their confidence and range); and
+  the largest object over it (`ground_object.asc`, an id in `objects.csv`,
+  which lists every object's class, height and footprint). Large holes are
+  where a walk left the ground unseen: what guided mapping sends the user
+  back to look at.
 
 ## terrain
 

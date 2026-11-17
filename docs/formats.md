@@ -21,7 +21,11 @@ stages). Code: [map_package.hpp](../include/vg_core/map_package.hpp).
 | `surface.asc` | ASCII grid | m | surface | Highest surface per cell |
 | `ground.asc` | ASCII grid | m | ground | Bare ground per cell, patched |
 | `ground_patched.asc` | ASCII grid | 0/1 | ground | 1 where patched rather than seen |
+| `ground_state.asc` | ASCII grid | state | ground | What's known of the ground: 1 measured, 2 under an object (patched), 3 small hole (patched), 4 hole too large to patch; no data where not seen |
+| `ground_weight.asc` | ASCII grid | weight | ground | Fused weight of the measured ground: how much it was seen |
+| `ground_object.asc` | ASCII grid | id | ground | The `objects.csv` id of the largest object over the cell |
 | `objects.ply` | PLY | m | ground | Everything on or over the ground |
+| `objects.csv` | CSV | m, m² | ground | Each object: `id, voxels, grounded, class, class_share, bottom_above_ground_m, top_above_ground_m`, bounds `min_x … max_z`, `footprint_m2` |
 | `terrain.asc` | ASCII grid | m | terrain | Smooth contour of the land |
 | `features.asc` | ASCII grid | m | terrain | Surface above the terrain |
 | `canopy.asc` | ASCII grid | m | sky | Lowest canopy over the terrain |

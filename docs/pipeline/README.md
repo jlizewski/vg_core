@@ -36,7 +36,7 @@ flowchart TD
 | 1 | Build | recording | `map.vgm`, `trajectory.csv`, `sky.vgs` | [building.md](building.md) |
 | 2 | voxels | `map.vgm` | `voxels.ply`, `labels.ply` | [derived-maps.md](derived-maps.md#voxels) |
 | 3 | surface | `map.vgm` | `surface.asc` | [derived-maps.md](derived-maps.md#surface) |
-| 4 | ground | `map.vgm` | `ground.asc`, `ground_patched.asc`, `objects.ply` | [derived-maps.md](derived-maps.md#ground) |
+| 4 | ground | `map.vgm` | `ground.asc`, `ground_patched.asc`, `ground_state.asc`, `ground_weight.asc`, `ground_object.asc`, `objects.ply`, `objects.csv` | [derived-maps.md](derived-maps.md#ground) |
 | 5 | terrain | `ground.asc`, `surface.asc`, `trajectory.csv` | `terrain.asc`, `features.asc` | [derived-maps.md](derived-maps.md#terrain) |
 | 6 | sky | `sky.vgs`, `terrain.asc` | `canopy.asc`, `canopy_top.asc`, `canopy.ply` | [sun-and-sky.md](sun-and-sky.md#sky-and-canopy) |
 | 7 | sun | `map.vgm`, `ground.asc` | `sun_hours.asc`, `sun_energy.asc` | [sun-and-sky.md](sun-and-sky.md#sun-map) |

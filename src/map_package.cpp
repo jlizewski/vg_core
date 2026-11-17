@@ -36,14 +36,24 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 19> kFiles = {{
+constexpr std::array<FileInfo, 23> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
     {package_file::kGround, "m", "Height of the bare ground per cell, holes under objects patched"},
     {package_file::kGroundPatched, "",
      "Diagnostic: 1 where ground.asc is patched (interpolated), 0 where it was seen"},
+    {package_file::kGroundState, "",
+     "What the walk knows of the ground per cell: 1 measured, 2 under an object (patched), "
+     "3 small unseen hole (patched), 4 unseen hole too large to patch; no data: not seen"},
+    {package_file::kGroundWeight, "",
+     "Fused weight of the measured ground per cell: how much it was seen"},
+    {package_file::kGroundObject, "",
+     "The objects.csv id of the largest object over each cell, standing or overhanging"},
     {package_file::kObjects, "m", "Voxels of everything on or over the ground"},
+    {package_file::kObjectsTable, "m",
+     "Each object on or over the ground: voxels, grounded, class, height above the ground, "
+     "bounds, footprint area"},
     {package_file::kTerrain, "m",
      "Smooth contour of the ground, fitted to the seen ground and the walked path"},
     {package_file::kFeatures, "m",
@@ -473,6 +483,41 @@ void MapPackage::make_surface(const SurfaceOptions& options) {
        << package_file::kSurface << " (" << seconds_since(start) << " s)\n";
 }
 
+void MapPackage::save_ground_cells(const GroundSegmentation& split, double voxel_size) const {
+  const GroundMap& ground = split.ground;
+  constexpr float kNone = std::numeric_limits<float>::quiet_NaN();
+  HeightMap state = ground.heights;
+  HeightMap weight = ground.heights;
+  HeightMap object = ground.heights;
+  for (std::size_t i = 0; i < ground.heights.heights.size(); ++i) {
+    const bool known = ground.state[i] != GroundCell::None;
+    state.heights[i] = known ? static_cast<float>(ground.state[i]) : kNone;
+    weight.heights[i] = ground.state[i] == GroundCell::Measured ? ground.weight[i] : kNone;
+    object.heights[i] = ground.object[i] >= 0 ? static_cast<float>(ground.object[i] + 1) : kNone;
+  }
+  save_height_map(state, path(package_file::kGroundState));
+  save_height_map(weight, path(package_file::kGroundWeight));
+  save_height_map(object, path(package_file::kGroundObject));
+
+  std::ofstream table(path(package_file::kObjectsTable));
+  table.imbue(std::locale::classic());
+  table << "id,voxels,grounded,class,class_share,bottom_above_ground_m,top_above_ground_m,"
+           "min_x,min_y,min_z,max_x,max_y,max_z,footprint_m2\n";
+  for (std::size_t s = 0; s < split.segments.size(); ++s) {
+    const MapSegment& m = split.segments[s];
+    table << s + 1 << ',' << m.voxels.size() << ',' << (m.grounded ? 1 : 0) << ','
+          << semantic_class_name(m.label) << ',' << m.label_share << ','
+          << m.bottom_above_ground << ',' << m.top_above_ground << ','
+          << m.min.x() * voxel_size << ',' << m.min.y() * voxel_size << ','
+          << m.min.z() * voxel_size << ',' << (m.max.x() + 1) * voxel_size << ','
+          << (m.max.y() + 1) * voxel_size << ',' << (m.max.z() + 1) * voxel_size << ','
+          << m.footprint_area << '\n';
+  }
+  if (!table) {
+    throw std::runtime_error("cannot write " + path(package_file::kObjectsTable).string());
+  }
+}
+
 void MapPackage::make_ground(const GroundOptions& options) {
   const auto start = std::chrono::steady_clock::now();
   GroundConfig config = options.config;
@@ -487,9 +532,16 @@ void MapPackage::make_ground(const GroundOptions& options) {
       labels.push_back(map_.volume.label_of(v, min_label_votes_).value_or(SemanticClass::Unknown));
     }
   }
-  const GroundSegmentation split = segment_ground(occupied(), voxel_size, config, labels);
+  // Each voxel's fused weight: how much the ground there was seen.
+  std::vector<float> weights;
+  weights.reserve(occupied().size());
+  for (const auto& v : occupied()) {
+    weights.push_back(map_.volume.weight_at(v));
+  }
+  const GroundSegmentation split = segment_ground(occupied(), voxel_size, config, labels, weights);
 
   save_height_map(split.ground.heights, path(package_file::kGround));
+  save_ground_cells(split, voxel_size);
   HeightMap patched_map = split.ground.heights;
   for (std::size_t i = 0; i < patched_map.heights.size(); ++i) {
     if (!std::isnan(patched_map.heights[i])) {
@@ -514,6 +566,11 @@ void MapPackage::make_ground(const GroundOptions& options) {
     ++objects_by_label[static_cast<std::size_t>(segment.label)];
   }
 
+  std::array<std::size_t, 5> cells_by_state{};
+  for (const GroundCell s : split.ground.state) {
+    ++cells_by_state[static_cast<std::size_t>(s)];
+  }
+
   StageSettings settings;
   settings.add("cell_size_m", config.cell_size)
       .add("min_weight", map_.volume.config().min_weight)
@@ -527,7 +584,11 @@ void MapPackage::make_ground(const GroundOptions& options) {
       .add("objects", split.segments.size())
       .add("objects_grounded", grounded)
       .add("use_labels", labeled)
-      .add("columns_not_ground_by_label", split.columns_not_ground_by_label);
+      .add("columns_not_ground_by_label", split.columns_not_ground_by_label)
+      .add("cells_measured", cells_by_state[static_cast<std::size_t>(GroundCell::Measured)])
+      .add("cells_under_objects", cells_by_state[static_cast<std::size_t>(GroundCell::UnderObject)])
+      .add("cells_small_holes", cells_by_state[static_cast<std::size_t>(GroundCell::SmallHole)])
+      .add("cells_large_holes", cells_by_state[static_cast<std::size_t>(GroundCell::LargeHole)]);
   if (labeled) {
     for (std::size_t c = 0; c < kSemanticClasses; ++c) {
       settings.add(std::string(semantic_class_name(static_cast<SemanticClass>(c))) + "_objects",
@@ -539,6 +600,13 @@ void MapPackage::make_ground(const GroundOptions& options) {
        << " cells (" << patched << " patched), " << split.segments.size() << " objects ("
        << grounded << " standing on the ground) -> " << package_file::kGround << ", "
        << package_file::kObjects << " (" << seconds_since(start) << " s)" << std::endl;
+  log_ << "ground: cells measured "
+       << cells_by_state[static_cast<std::size_t>(GroundCell::Measured)] << ", under objects "
+       << cells_by_state[static_cast<std::size_t>(GroundCell::UnderObject)] << ", small holes "
+       << cells_by_state[static_cast<std::size_t>(GroundCell::SmallHole)] << ", large holes "
+       << cells_by_state[static_cast<std::size_t>(GroundCell::LargeHole)] << " -> "
+       << package_file::kGroundState << ", " << package_file::kGroundWeight << ", "
+       << package_file::kGroundObject << ", " << package_file::kObjectsTable << std::endl;
   if (labeled) {
     log_ << "ground: " << split.columns_not_ground_by_label
          << " columns not ground by their label; objects:";

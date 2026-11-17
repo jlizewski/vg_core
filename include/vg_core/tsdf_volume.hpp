@@ -147,6 +147,10 @@ class TsdfVolume {
   // (counting every class but unknown).
   std::optional<SemanticClass> label_of(const Eigen::Vector3i& voxel, int min_votes = 1) const;
 
+  // The voxel's fused weight (how much it was observed, see quality_weights);
+  // 0 if it was never observed.
+  float weight_at(const Eigen::Vector3i& voxel) const;
+
  private:
 
   struct IndexHash {

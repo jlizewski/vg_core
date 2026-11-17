@@ -9,7 +9,11 @@
 //   semantic.asc    class of the top labeled voxel per cell  <- semantic stage
 //   surface.asc     top surface height per cell (m)        <- surface stage
 //   ground.asc      bare ground height per cell (m)        <- ground stage
+//   ground_state.asc   what's known of the ground per cell (vg::GroundCell)  <- ground stage
+//   ground_weight.asc  how much the measured ground was seen  <- ground stage
+//   ground_object.asc  the object over each cell (objects.csv id)  <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
+//   objects.csv     each object: class, height, bounds, footprint  <- ground stage
 //   terrain.asc     smooth contour of the ground (m)       <- terrain stage
 //   features.asc    surface height above the terrain (m)   <- terrain stage
 //   sky.vgs         where sky was seen, and blocked beyond depth  <- build, when labeled
@@ -51,7 +55,11 @@ inline constexpr const char* kVoxels = "voxels.ply";
 inline constexpr const char* kSurface = "surface.asc";
 inline constexpr const char* kGround = "ground.asc";
 inline constexpr const char* kGroundPatched = "ground_patched.asc";
+inline constexpr const char* kGroundState = "ground_state.asc";
+inline constexpr const char* kGroundWeight = "ground_weight.asc";
+inline constexpr const char* kGroundObject = "ground_object.asc";
 inline constexpr const char* kObjects = "objects.ply";
+inline constexpr const char* kObjectsTable = "objects.csv";
 inline constexpr const char* kTerrain = "terrain.asc";
 inline constexpr const char* kFeatures = "features.asc";
 inline constexpr const char* kSky = "sky.vgs";
@@ -176,7 +184,11 @@ class MapPackage {
   // surface.asc: the highest surface point per cell.
   void make_surface(const SurfaceOptions& options = {});
 
-  // ground.asc and objects.ply: see segment_ground().
+  // ground.asc and objects.ply: see segment_ground(); and what each walk
+  // knows of the ground per cell, for combining walks in a site:
+  // ground_state.asc (GroundCell; no data for None), ground_weight.asc
+  // (measured cells only), ground_object.asc (the objects.csv id of the
+  // largest object over the cell) and objects.csv.
   void make_ground(const GroundOptions& options = {});
 
   // terrain.asc: a smooth contour of the ground fitted to ground.asc's seen
@@ -203,6 +215,7 @@ class MapPackage {
   // All occupied voxels, sorted, computed once.
   const std::vector<Eigen::Vector3i>& occupied();
   std::filesystem::path path(const char* file) const { return dir_ / file; }
+  void save_ground_cells(const GroundSegmentation& split, double voxel_size) const;
 
   std::filesystem::path dir_;
   std::ostream& log_;

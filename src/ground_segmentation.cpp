@@ -333,7 +333,8 @@ void fill_holes(HeightMap& map, const std::vector<char>& fill, std::vector<std::
 
 GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
                                   const GroundConfig& config,
-                                  const std::vector<SemanticClass>& labels) {
+                                  const std::vector<SemanticClass>& labels,
+                                  const std::vector<float>& weights) {
   GroundSegmentation result;
   result.ground.heights.cell_size = config.cell_size;
   if (voxels.empty()) {
@@ -351,10 +352,16 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
   columns.width = max.x() - columns.min.x() + 1;
   columns.height = max.y() - columns.min.y() + 1;
   std::vector<int> bottom(columns.cells(), kNoVoxel);
-  for (const auto& v : voxels) {
-    int& b = bottom[columns.index(v.x(), v.y())];
-    b = std::min(b, v.z());
+  std::vector<std::size_t> bottom_voxel(columns.cells(), 0);  // Its index in voxels.
+  for (std::size_t i = 0; i < voxels.size(); ++i) {
+    const Eigen::Vector3i& v = voxels[i];
+    const std::size_t c = columns.index(v.x(), v.y());
+    if (v.z() < bottom[c]) {
+      bottom[c] = v.z();
+      bottom_voxel[c] = i;
+    }
   }
+  const bool weighted = weights.size() == voxels.size();
 
   // The label of each column's bottom voxel, when the voxels are labeled.
   const bool labeled = config.use_labels && labels.size() == voxels.size();
@@ -492,6 +499,7 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
   map.height = cells.height;
   std::vector<double> sum(cells.cells(), 0.0);
   std::vector<int> count(cells.cells(), 0);
+  result.ground.weight.assign(cells.cells(), 0.0f);
   for (std::size_t i = 0; i < columns.cells(); ++i) {
     if (!ground_column[i]) {
       continue;
@@ -500,6 +508,9 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
     const std::size_t cell = cells.index(cell_of(c.x(), c.y()).x(), cell_of(c.x(), c.y()).y());
     sum[cell] += (bottom[i] + 1) * voxel_size;
     ++count[cell];
+    if (weighted) {
+      result.ground.weight[cell] += weights[bottom_voxel[i]];
+    }
   }
   map.heights.assign(cells.cells(), kNaN);
   for (std::size_t i = 0; i < cells.cells(); ++i) {
@@ -509,17 +520,32 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
   }
 
   // Holes to patch: everything under a segment, plus small unseen holes
-  // enclosed by ground or segments.
+  // enclosed by ground or segments. Each cell also notes the largest segment
+  // over it (they're sorted largest first).
   std::vector<char> fill(cells.cells(), 0);
-  for (const auto& segment : result.segments) {
-    for (const auto& v : segment.voxels) {
+  std::vector<char> under_object(cells.cells(), 0);
+  result.ground.object.assign(cells.cells(), -1);
+  std::vector<int> counted_for(cells.cells(), -1);  // Footprints: cells counted once.
+  for (std::size_t s = 0; s < result.segments.size(); ++s) {
+    std::size_t footprint = 0;
+    for (const auto& v : result.segments[s].voxels) {
       const Eigen::Vector2i c = cell_of(v.x(), v.y());
       const std::size_t i = cells.index(c.x(), c.y());
+      if (counted_for[i] != static_cast<int>(s)) {
+        counted_for[i] = static_cast<int>(s);
+        ++footprint;
+      }
+      if (result.ground.object[i] < 0) {
+        result.ground.object[i] = static_cast<int>(s);
+      }
       if (std::isnan(map.heights[i])) {
         fill[i] = 1;
+        under_object[i] = 1;
       }
     }
+    result.segments[s].footprint_area = static_cast<double>(footprint) * cs * cs;
   }
+  std::vector<char> large_hole(cells.cells(), 0);
   std::vector<char> seen(cells.cells(), 0);
   const double cell_area = cs * cs;
   for (std::size_t start = 0; start < cells.cells(); ++start) {
@@ -543,14 +569,26 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
         }
       }
     }
-    if (enclosed && static_cast<double>(hole.size()) * cell_area <= config.max_hole_area) {
+    if (enclosed) {
+      const bool small = static_cast<double>(hole.size()) * cell_area <= config.max_hole_area;
       for (const std::size_t i : hole) {
-        fill[i] = 1;
+        (small ? fill : large_hole)[i] = 1;
       }
     }
   }
   result.ground.filled.assign(cells.cells(), 0);
   fill_holes(map, fill, result.ground.filled);
+  result.ground.state.assign(cells.cells(), GroundCell::None);
+  for (std::size_t i = 0; i < cells.cells(); ++i) {
+    GroundCell& state = result.ground.state[i];
+    if (count[i] > 0) {
+      state = GroundCell::Measured;
+    } else if (result.ground.filled[i] != 0) {
+      state = under_object[i] ? GroundCell::UnderObject : GroundCell::SmallHole;
+    } else if (large_hole[i]) {
+      state = GroundCell::LargeHole;
+    }
+  }
 
   // What each segment mostly is, by its voxels' labels.
   if (labeled) {
@@ -601,7 +639,13 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
 }
 
 GroundSegmentation segment_ground(const TsdfVolume& volume, const GroundConfig& config) {
-  return segment_ground(volume.occupied_voxels(), volume.config().voxel_size, config);
+  const std::vector<Eigen::Vector3i> voxels = volume.occupied_voxels();
+  std::vector<float> weights;
+  weights.reserve(voxels.size());
+  for (const auto& v : voxels) {
+    weights.push_back(volume.weight_at(v));
+  }
+  return segment_ground(voxels, volume.config().voxel_size, config, {}, weights);
 }
 
 }  // namespace vg

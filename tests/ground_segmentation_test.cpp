@@ -175,6 +175,65 @@ TEST(GroundSegmentation, RaisedSurfaceAcrossGapIsNotGround) {
   EXPECT_FALSE(result.segments[0].grounded);
 }
 
+std::size_t cell_at(const vg::GroundMap& ground, double x, double y) {
+  const auto& map = ground.heights;
+  return ground.index(static_cast<int>(std::floor((x - map.origin.x()) / map.cell_size)),
+                      static_cast<int>(std::floor((y - map.origin.y()) / map.cell_size)));
+}
+
+TEST(GroundSegmentation, TellsWhatEachCellKnowsOfTheGround) {
+  // A 4 x 2 m yard: a raised bed hiding the ground (as in the test above), a
+  // branch over seen ground, a small and a large unseen hole, and a notch at
+  // the edge that nothing encloses.
+  Voxels voxels;
+  add_ground(voxels, 0, 200, 0, 100, -1, [](int x, int y) {
+    const bool bed = x > 30 && x < 60 && y > 30 && y < 60;
+    const bool small = x >= 95 && x < 105 && y >= 85 && y < 95;
+    const bool large = x >= 120 && x < 180 && y >= 20 && y < 80;
+    const bool notch = x >= 190 && y < 10;
+    return bed || small || large || notch;
+  });
+  add_bed(voxels, 30, 60, 14);
+  for (int y = 10; y < 30; ++y) {
+    for (int x = 70; x < 90; ++x) {
+      voxels.emplace_back(x, y, 50);
+    }
+  }
+  // Ground voxels were seen with weight 3, everything else 1.
+  std::vector<float> weights;
+  for (const auto& v : voxels) {
+    weights.push_back(v.z() == -1 ? 3.0f : 1.0f);
+  }
+
+  const auto result = vg::segment_ground(voxels, kVoxel, {}, {}, weights);
+  const vg::GroundMap& g = result.ground;
+  using vg::GroundCell;
+  ASSERT_EQ(g.state.size(), g.heights.heights.size());
+
+  EXPECT_EQ(g.state[cell_at(g, 0.1, 0.1)], GroundCell::Measured);
+  EXPECT_EQ(g.state[cell_at(g, 1.6, 0.4)], GroundCell::Measured);  // Under the branch, but seen.
+  EXPECT_EQ(g.state[cell_at(g, 0.9, 0.9)], GroundCell::UnderObject);
+  EXPECT_EQ(g.state[cell_at(g, 2.0, 1.8)], GroundCell::SmallHole);
+  EXPECT_EQ(g.state[cell_at(g, 3.0, 1.0)], GroundCell::LargeHole);
+  EXPECT_TRUE(std::isnan(g.heights.heights[cell_at(g, 3.0, 1.0)]));
+  EXPECT_EQ(g.state[cell_at(g, 3.9, 0.1)], GroundCell::None);
+
+  // Weight: the ground columns' weights summed (2 or 3 columns of 0.02 m per
+  // 0.05 m cell each way); nothing where the ground wasn't seen.
+  const float w = g.weight[cell_at(g, 0.1, 0.1)];
+  EXPECT_GE(w, 3.0f * 4);
+  EXPECT_LE(w, 3.0f * 9);
+  EXPECT_FLOAT_EQ(std::fmod(w, 3.0f), 0.0f);
+  EXPECT_EQ(g.weight[cell_at(g, 0.9, 0.9)], 0.0f);
+
+  // Objects: the bed (largest) over its cells, the branch over its own.
+  ASSERT_EQ(result.segments.size(), 2u);
+  EXPECT_EQ(g.object[cell_at(g, 0.9, 0.9)], 0);
+  EXPECT_EQ(g.object[cell_at(g, 1.6, 0.4)], 1);
+  EXPECT_EQ(g.object[cell_at(g, 0.1, 0.1)], -1);
+  EXPECT_NEAR(result.segments[1].footprint_area, 0.4 * 0.4, 1e-9);  // 20 x 20 voxels.
+}
+
 TEST(GroundSegmentation, PatchesOnlySmallEnclosedHoles) {
   // Unseen holes in the ground: 0.2 x 0.2 m (patched) and 1.2 x 1.2 m (left).
   Voxels voxels;

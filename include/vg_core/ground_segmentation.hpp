@@ -78,24 +78,45 @@ struct MapSegment {
   // beneath them, in meters (NaN where there is no ground map below).
   double bottom_above_ground = 0.0;
   double top_above_ground = 0.0;
+  // Area of the ground map's cells it has voxels over, in square meters.
+  double footprint_area = 0.0;
   // The class most of its labeled voxels have (Unknown if none are), and the
   // share of its labeled voxels that have it.
   SemanticClass label = SemanticClass::Unknown;
   double label_share = 0.0;
 };
 
+// What a walk knows about the ground in one cell.
+enum class GroundCell : std::uint8_t {
+  None = 0,         // Not seen: beyond the walk, or nothing to patch from.
+  Measured = 1,     // Ground seen there.
+  UnderObject = 2,  // Hidden under an object standing on or over it; patched.
+  SmallHole = 3,    // Unseen, enclosed and small (max_hole_area); patched.
+  LargeHole = 4,    // Unseen and enclosed, but too large to patch; no height.
+};
+
 struct GroundMap {
   // Ground surface height per cell, holes patched. NaN where there is no
   // ground and nothing to patch from (e.g. beyond the scanned area).
   HeightMap heights;
-  // Same layout as heights: 1 where the height was interpolated rather than
-  // observed.
+  // The rest have the same layout as heights.
+  // 1 where the height was interpolated rather than observed.
   std::vector<std::uint8_t> filled;
+  std::vector<GroundCell> state;
+  // Measured cells: the total fused weight of the ground seen there (the
+  // weights given to segment_ground(), summed over the cell's columns); how
+  // much to trust it against another walk's. 0 elsewhere, or without weights.
+  std::vector<float> weight;
+  // The largest segment (index into GroundSegmentation::segments) with voxels
+  // over the cell, standing on it or overhanging; -1 for none.
+  std::vector<int> object;
 
-  bool is_filled(int x, int y) const {
-    return filled[static_cast<std::size_t>(y) * static_cast<std::size_t>(heights.width) +
-                  static_cast<std::size_t>(x)] != 0;
+  std::size_t index(int x, int y) const {
+    return static_cast<std::size_t>(y) * static_cast<std::size_t>(heights.width) +
+           static_cast<std::size_t>(x);
   }
+  bool is_filled(int x, int y) const { return filled[index(x, y)] != 0; }
+  GroundCell state_at(int x, int y) const { return state[index(x, y)]; }
 };
 
 struct GroundSegmentation {
@@ -118,12 +139,15 @@ struct GroundSegmentation {
 //
 // labels, if not empty, is each voxel's semantic class (as from
 // TsdfVolume::label_of(), Unknown where it has none), in the same order as
-// voxels; see GroundConfig::use_labels.
+// voxels; see GroundConfig::use_labels. weights, if not empty, is each
+// voxel's fused weight (TsdfVolume::weight_at()), in the same order, for
+// GroundMap::weight.
 GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, double voxel_size,
                                   const GroundConfig& config = {},
-                                  const std::vector<SemanticClass>& labels = {});
+                                  const std::vector<SemanticClass>& labels = {},
+                                  const std::vector<float>& weights = {});
 
-// Segments the occupied voxels of a volume.
+// Segments the occupied voxels of a volume, with their weights.
 GroundSegmentation segment_ground(const TsdfVolume& volume, const GroundConfig& config = {});
 
 }  // namespace vg

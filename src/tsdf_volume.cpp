@@ -62,6 +62,11 @@ const TsdfVolume::Voxel* TsdfVolume::find_voxel(const Eigen::Vector3i& voxel) co
   return &it->second[linear_index(voxel - block * kBlockSize)];
 }
 
+float TsdfVolume::weight_at(const Eigen::Vector3i& voxel) const {
+  const Voxel* v = find_voxel(voxel);
+  return v != nullptr ? v->weight : 0.0f;
+}
+
 void TsdfVolume::integrate(const DepthFrame& raw, const Eigen::Isometry3d& world_from_camera) {
   // Readings the filters reject are removed up front, so they neither place
   // blocks nor update the voxels that project onto them.
