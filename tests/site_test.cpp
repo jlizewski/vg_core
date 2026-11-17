@@ -2,7 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <sstream>
 
 #include "test_scene.hpp"
@@ -93,6 +96,65 @@ TEST_F(SiteTest, AddsVisitsOldestFirstAndMakesCurrentMaps) {
     earlier += v == 1.0f ? 1 : 0;
   }
   EXPECT_GT(latest, earlier);
+}
+
+std::string read_all(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+TEST_F(SiteTest, MakesTheGroundLayerFromEveryVisit) {
+  const fs::path site_dir = root_ / "site";
+  vg::Site site(site_dir);
+  site.add(root_ / "walks" / "recording-20261009-175006", {}, log_);
+  site.add(root_ / "walks" / "recording-20261016-115329", {}, log_, true);
+
+  const vg::GroundLayer layer = site.make_ground_layer(log_);
+  const fs::path dir = site_dir / vg::ground_layer_file::kDir;
+  for (const char* name :
+       {vg::ground_layer_file::kEvidence, vg::ground_layer_file::kHeights,
+        vg::ground_layer_file::kState, vg::ground_layer_file::kProvenance,
+        vg::ground_layer_file::kObservations, vg::ground_layer_file::kSource,
+        vg::ground_layer_file::kInfo}) {
+    EXPECT_TRUE(fs::is_regular_file(dir / name)) << name;
+  }
+  std::size_t measured = 0;
+  for (const vg::GroundState s : layer.state) {
+    measured += s == vg::GroundState::Measured ? 1 : 0;
+  }
+  EXPECT_GT(measured, 0u);
+  EXPECT_NE(read_all(dir / vg::ground_layer_file::kEvidence).find("recording-20261016-115329"),
+            std::string::npos);
+
+  // The same inputs give the same files.
+  const std::string heights = read_all(dir / vg::ground_layer_file::kHeights);
+  const std::string state = read_all(dir / vg::ground_layer_file::kState);
+  const std::string info = read_all(dir / vg::ground_layer_file::kInfo);
+  site.make_ground_layer(log_);
+  EXPECT_EQ(read_all(dir / vg::ground_layer_file::kHeights), heights);
+  EXPECT_EQ(read_all(dir / vg::ground_layer_file::kState), state);
+  EXPECT_EQ(read_all(dir / vg::ground_layer_file::kInfo), info);
+
+  // An edit is picked up from edits.csv: the bed marked as standing on the
+  // ground, which then runs on beneath it.
+  vg::GroundEdit bed;
+  bed.id = "bed";
+  bed.time = "2026-11-16T12:00:00Z";
+  bed.kind = vg::GroundEdit::Kind::NotGround;
+  bed.polygon = {{0.2, -0.3}, {0.9, -0.3}, {0.9, 0.5}, {0.2, 0.5}};
+  vg::save_ground_edits({bed}, dir / vg::ground_layer_file::kEdits);
+  const vg::GroundLayer edited = site.make_ground_layer(log_);
+  EXPECT_NE(read_all(dir / vg::ground_layer_file::kInfo).find("\"edits\": [\"bed\"]"),
+            std::string::npos);
+  std::size_t covered = 0;
+  for (std::size_t i = 0; i < edited.state.size(); ++i) {
+    if (edited.state[i] == vg::GroundState::Covered) {
+      ++covered;
+      EXPECT_EQ(edited.provenance[i], vg::Provenance::Edited);
+      EXPECT_FALSE(std::isnan(edited.heights.heights[i]));
+    }
+  }
+  EXPECT_GT(covered, 10u);  // 0.7 x 0.8 m at 0.15 m cells: about 20.
 }
 
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {

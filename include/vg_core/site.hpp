@@ -16,6 +16,9 @@
 //     canopy.asc, canopy_top.asc, canopy.ply
 //                       the canopy from every visit's sky evidence together
 //     model.glb         the site in 3D (Site::model), for viewing
+//   layers/             the site's layers (docs/design/guided-mapping.md):
+//     ground/           the ground, combined from every visit, with the
+//                       user's edits (ground_layer.hpp)
 //
 // The first visit defines the site frame. Each later one is registered
 // against all the visits before it, combined. Packages stay where they are;
@@ -27,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "vg_core/ground_layer.hpp"
 #include "vg_core/registration.hpp"
 #include "vg_core/sky.hpp"
 #include "vg_core/surface_mesh.hpp"
@@ -80,6 +84,11 @@ class Site {
   // Writes current/: the latest visit's view of each cell, the changes, and
   // the canopy from all visits' sky evidence.
   void make_maps(std::ostream& log, const CanopyConfig& canopy = {}) const;
+
+  // Builds the ground layer (ground_layer.hpp) from every visit's ground stage
+  // outputs and the edits in layers/ground/edits.csv, and writes it there.
+  // Throws std::runtime_error if a visit's ground outputs are missing.
+  GroundLayer make_ground_layer(std::ostream& log, const GroundLayerConfig& config = {}) const;
 
   // The site in 3D, from current/ (made by make_maps): the surface colored
   // by the class seen from above ("surface"), and the canopy's underside

@@ -12,7 +12,9 @@
 
 #include <Eigen/Geometry>
 
+#include "vg_core/ground_layer.hpp"
 #include "vg_core/height_map_io.hpp"
+#include "vg_core/version.hpp"
 #include "vg_core/map_package.hpp"
 #include "vg_core/semantics.hpp"
 #include "vg_core/voxel_map_io.hpp"
@@ -486,6 +488,95 @@ std::vector<MeshPart> Site::model() const {
   const Rgba leaves = rgba(semantic_class_color(SemanticClass::Tree));
   parts[1].mesh = mesh_from_height_map(canopy, [&](int, int) { return leaves; });
   return parts;
+}
+
+namespace {
+
+// A layer's per-cell values as a grid on its heights' layout, no data where
+// value gives NaN.
+template <typename T, typename F>
+HeightMap layer_grid(const HeightMap& heights, const std::vector<T>& values, F value) {
+  HeightMap grid = heights;
+  for (std::size_t i = 0; i < values.size(); ++i) {
+    grid.heights[i] = value(values[i]);
+  }
+  return grid;
+}
+
+}  // namespace
+
+GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& config) const {
+  const auto start = std::chrono::steady_clock::now();
+  const auto dir = dir_ / ground_layer_file::kDir;
+  std::filesystem::create_directories(dir);
+
+  std::vector<WalkGround> walks;
+  for (const SiteVisit& v : visits_) {
+    WalkGround walk = load_walk_ground(package_dir(v));
+    walk.recorded = v.recorded;
+    walk.site_from_map = v.site_from_map;
+    walks.push_back(std::move(walk));
+  }
+  const std::vector<GroundEdit> edits = load_ground_edits(dir / ground_layer_file::kEdits);
+  const GroundLayer layer = estimate_ground(walks, edits, config);
+
+  constexpr float kNone = std::numeric_limits<float>::quiet_NaN();
+  save_height_map(layer.heights, dir / ground_layer_file::kHeights);
+  save_height_map(layer_grid(layer.heights, layer.state,
+                             [](GroundState s) {
+                               return s == GroundState::Outside ? kNone : static_cast<float>(s);
+                             }),
+                  dir / ground_layer_file::kState);
+  save_height_map(layer_grid(layer.heights, layer.provenance,
+                             [](Provenance p) {
+                               return p == Provenance::None ? kNone : static_cast<float>(p);
+                             }),
+                  dir / ground_layer_file::kProvenance);
+  save_height_map(layer_grid(layer.heights, layer.observations,
+                             [](std::uint16_t n) { return n == 0 ? kNone : static_cast<float>(n); }),
+                  dir / ground_layer_file::kObservations);
+  save_height_map(layer_grid(layer.heights, layer.source,
+                             [](int k) { return k < 0 ? kNone : static_cast<float>(k + 1); }),
+                  dir / ground_layer_file::kSource);
+
+  // The evidence used: each walk, and where it was placed.
+  {
+    std::ofstream out(dir / ground_layer_file::kEvidence);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "id,package,recorded,yaw_deg,x,y,z\n";
+    for (std::size_t k = 0; k < walks.size(); ++k) {
+      const MapTransform& t = walks[k].site_from_map;
+      out << k + 1 << ',' << visits_[k].package.generic_string() << ',' << walks[k].recorded
+          << ',' << t.yaw * 180.0 / kPi << ',' << t.translation.x() << ',' << t.translation.y()
+          << ',' << t.translation.z() << '\n';
+    }
+  }
+
+  // How it was made. No timestamps: the same inputs give the same files.
+  std::array<std::size_t, 5> by_state{};
+  for (const GroundState s : layer.state) {
+    ++by_state[static_cast<std::size_t>(s)];
+  }
+  {
+    std::ofstream out(dir / ground_layer_file::kInfo);
+    out.imbue(std::locale::classic());
+    out << "{\n  \"layer\": \"ground\",\n  \"vg_core_version\": \"" << version_string()
+        << "\",\n  \"combine\": \"latest\",\n  \"cell_size_m\": " << layer.heights.cell_size
+        << ",\n  \"walks\": " << walks.size() << ",\n  \"edits\": [";
+    for (std::size_t e = 0; e < edits.size(); ++e) {
+      out << (e > 0 ? ", " : "") << '"' << edits[e].id << '"';
+    }
+    out << "],\n  \"cells\": {\"measured\": " << by_state[1] << ", \"filled\": " << by_state[2]
+        << ", \"covered\": " << by_state[3] << ", \"unknown\": " << by_state[4]
+        << ", \"outside\": " << by_state[0] << "}\n}\n";
+  }
+  log << "ground layer: " << layer.heights.width << " x " << layer.heights.height
+      << " cells from " << walks.size() << " walks and " << edits.size() << " edits: measured "
+      << by_state[1] << ", filled " << by_state[2] << ", covered " << by_state[3]
+      << ", unknown " << by_state[4] << " -> " << ground_layer_file::kDir << "/ ("
+      << seconds_since(start) << " s)" << std::endl;
+  return layer;
 }
 
 }  // namespace vg

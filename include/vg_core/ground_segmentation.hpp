@@ -147,6 +147,13 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
                                   const std::vector<SemanticClass>& labels = {},
                                   const std::vector<float>& weights = {});
 
+// Fills the cells of map marked in fill smoothly from the cells with heights
+// around them (each settles to the mean of its neighbors: Laplace's
+// equation), and marks them in filled. A region that touches no cell with a
+// height stays NaN. filled must have map's size.
+void fill_height_holes(HeightMap& map, const std::vector<char>& fill,
+                       std::vector<std::uint8_t>& filled);
+
 // Segments the occupied voxels of a volume, with their weights.
 GroundSegmentation segment_ground(const TsdfVolume& volume, const GroundConfig& config = {});
 

@@ -638,6 +638,11 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
   return result;
 }
 
+void fill_height_holes(HeightMap& map, const std::vector<char>& fill,
+                       std::vector<std::uint8_t>& filled) {
+  fill_holes(map, fill, filled);
+}
+
 GroundSegmentation segment_ground(const TsdfVolume& volume, const GroundConfig& config) {
   const std::vector<Eigen::Vector3i> voxels = volume.occupied_voxels();
   std::vector<float> weights;

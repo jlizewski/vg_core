@@ -18,7 +18,7 @@ namespace {
 void prepare_for_site(const std::filesystem::path& dir, std::ostream& log) {
   std::vector<std::string> stages;
   for (const auto& [file, stage] :
-       {std::pair{package_file::kSurface, "surface"}, std::pair{package_file::kGround, "ground"},
+       {std::pair{package_file::kSurface, "surface"}, std::pair{package_file::kGroundState, "ground"},
         std::pair{package_file::kTerrain, "terrain"}}) {
     if (!stages.empty() || !std::filesystem::is_regular_file(dir / file)) {
       stages.push_back(stage);  // And everything after it.
@@ -123,6 +123,14 @@ bool add_to_site(const std::filesystem::path& site_dir,
   }
   site.make_maps(log, config.sky.config);
   return all_added;
+}
+
+void make_site_ground(const std::filesystem::path& site_dir, std::ostream& log) {
+  const Site site(site_dir);
+  for (const SiteVisit& visit : site.visits()) {
+    prepare_for_site(site.package_dir(visit), log);
+  }
+  site.make_ground_layer(log);
 }
 
 void make_site_maps(const std::filesystem::path& site_dir,

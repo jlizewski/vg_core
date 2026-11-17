@@ -82,6 +82,8 @@ garden-site/
     visit.asc     which visit (1 = first) each cell came from
     changes.asc   surface height change since the visit before (m)
     canopy.asc, canopy_top.asc, canopy.ply
+  layers/      the site's layers (design/guided-mapping.md)
+    ground/       the ground from every visit, with the user's edits
 ```
 
 `site.csv` lists each visit's package path (relative to the site when
@@ -105,6 +107,32 @@ fit. See [formats.md](../formats.md#site).
   together, then read out as in the
   [sky stage](sun-and-sky.md#canopy-the-sky-stage). Many walks see far more
   of the sky than one.
+
+## The ground layer
+
+`vg site ground` (`Site::make_ground_layer()`) builds the first of the
+site's layers ([design/guided-mapping.md](../design/guided-mapping.md)):
+the ground as an entity of its own, from every visit's ground stage outputs
+(`ground_state.asc`, `ground_weight.asc`), in `layers/ground/`
+([formats.md](../formats.md#layersground)).
+
+- **State per cell**: *measured* if any walk saw ground there; otherwise
+  *covered* (under an object in some walk), *filled* (a small unseen hole),
+  *unknown* (an unseen hole too large to fill: a place to go and look), or
+  *outside*.
+- **Where each value came from**: *measured*, *inferred* (patched), *edited*,
+  and, later, *confirmed*; how many walks measured each cell, and which one
+  the height came from.
+- **Edits** in `edits.csv` are applied on every build, in order: an area
+  marked `ground` is filled where it wasn't measured, one marked `not_ground`
+  is covered; either way the ground under it is filled smoothly from the
+  ground around it.
+- **Combining** walks that measured a cell: the latest wins for now, as in
+  `current/`. A robust combination (median, weighted by how much each walk
+  saw) replaces it next, so one bad walk can't make a dip.
+
+The same evidence and edits always give byte-identical files. Packages made
+before the ground stage wrote its per-cell outputs get them first.
 
 ## What sites don't do yet
 

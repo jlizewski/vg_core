@@ -2,7 +2,12 @@
 //
 //   vg_site add <site_dir> <package>... [--force] [--config FILE] [--set PATH=VALUE] [flags]
 //   vg_site maps <site_dir>
+//   vg_site ground <site_dir>
 //   vg_site list <site_dir>
+//
+// ground builds the site's ground layer (layers/ground/, see
+// vg_core/ground_layer.hpp): every visit's ground combined, with the edits in
+// layers/ground/edits.csv applied.
 //
 // add registers each package against the visits so far (the first one sets
 // the site's frame) and remakes current/. A package missing its terrain maps
@@ -31,6 +36,7 @@ constexpr double kPi = 3.14159265358979323846;
 int usage(const vg::config::ParamSet& params) {
   std::cerr << "usage: vg_site add <site_dir> <package>... [--force] [settings]\n"
                "       vg_site maps <site_dir>\n"
+               "       vg_site ground <site_dir>\n"
                "       vg_site list <site_dir>\n"
             << params.flags_help();
   return 2;
@@ -80,8 +86,8 @@ int main(int argc, char** argv) {
       packages.emplace_back(args[i]);
     }
   }
-  if ((command == "add") == packages.empty() || (command != "add" && command != "maps" &&
-                                                 command != "list")) {
+  if ((command == "add") == packages.empty() ||
+      (command != "add" && command != "maps" && command != "ground" && command != "list")) {
     return usage(params);
   }
   try {
@@ -90,6 +96,8 @@ int main(int argc, char** argv) {
       all_added = vg::config::add_to_site(site_dir, packages, force, settings, std::cout);
     } else if (command == "maps") {
       vg::config::make_site_maps(site_dir, settings, std::cout);
+    } else if (command == "ground") {
+      vg::config::make_site_ground(site_dir, std::cout);
     }
     list(vg::Site(site_dir));
     return all_added ? 0 : 1;

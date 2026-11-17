@@ -112,6 +112,23 @@ A header row, then one row per visit, oldest first:
 The same grids as a package, in the site frame, plus `visit.asc` (visit
 number per cell, 1 = first) and `changes.asc` (surface change in m).
 
+### `layers/ground/`
+
+The ground layer ([ground_layer.hpp](../include/vg_core/ground_layer.hpp)),
+written by `vg site ground`. Grids are on one site grid at the first walk's
+cell size.
+
+| File | Format | Contents |
+| --- | --- | --- |
+| `ground.asc` | ASCII grid, m | Ground height; no data where outside or unknown |
+| `state.asc` | ASCII grid | 1 measured, 2 filled, 3 covered, 4 unknown; no data outside |
+| `provenance.asc` | ASCII grid | 1 measured, 2 inferred, 3 edited, 4 confirmed; no data where none |
+| `observations.asc` | ASCII grid | How many walks measured the cell |
+| `source.asc` | ASCII grid | The `evidence.csv` id the height came from |
+| `evidence.csv` | CSV | The walks used: `id, package, recorded, yaw_deg, x, y, z` |
+| `edits.csv` | CSV | The user's edits: `id, time, kind, polygon, note`; kind `ground` or `not_ground`, polygon `x y;x y;...` in the site frame (m), the note is the rest of the line. Read, never rewritten |
+| `layer.json` | JSON | How it was made: combine rule, cell size, walks, edits applied, cells per state |
+
 ## Planned
 
 - **Garden model** storage inside the site directory:
