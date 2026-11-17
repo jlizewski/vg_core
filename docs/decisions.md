@@ -170,3 +170,56 @@ Where to build it is open:
 - **Extending the Python dashboard** (`vg dashboard`). Fastest to change and
   already shows sites and maps, but everything settled there is rebuilt in
   Flutter.
+
+## D14. A site is mapped as layers, in a guided sequence
+
+**Proposed** · 2026-11-16
+
+A site is a set of layers (boundary, ground, features, structures, skyline,
+canopy), each with its own shape, kept evidence, estimator, uncertainty and
+guidance. They're built in order (a boundary walk and the ground first, then
+skyline, structures and canopy from stations where the user stands still),
+computed as the user maps, and confirmed against the camera view.
+
+*Why:* one generic reconstruction from free walks is noisy where it matters
+and blind past depth's reach; a shape suited to each thing needs little
+evidence, and guidance from what's unknown makes results consistent. See
+[design/guided-mapping.md](design/guided-mapping.md).
+
+## D15. The ground is the site's anchor, combined over every walk
+
+**Proposed** · 2026-11-16 · Replaces "latest walk wins" for the ground
+
+The ground is a layer of its own: a smooth surface with a state per cell
+(measured, filled, covered, unknown, outside), combined robustly over all
+walks rather than taken from the latest. Other layers are placed on it, and
+relocalization matches against it and the feature elements.
+
+*Why:* the ground barely changes, so one bad walk shouldn't make a dip that
+comes and goes; it's what the garden is planned on. See
+[design/guided-mapping.md](design/guided-mapping.md#layers).
+
+## D16. User edits win over measurements
+
+**Proposed** · 2026-11-16
+
+An edit is kept as its own dated evidence with the highest priority. New
+measurements that disagree don't override it; they're flagged for the user.
+
+*Why:* the user knows their yard; the cleanest fix for a wrong shape is often
+the user's, and it must survive the next walk. See
+[design/guided-mapping.md](design/guided-mapping.md#edits).
+
+## D17. One tracking session per mapping run; relocalize by a guided walk, confirmed by overlay
+
+**Proposed** · 2026-11-16
+
+A mapping run's steps share one ARCore session, so they share a frame with
+nothing to relocalize. A later run relocalizes with a short guided walk through
+a part of the site known to register well, and the user confirms the placement
+on an overlay. GPS (and the compass) order candidates but never decide.
+
+*Why:* measured: short captures register right without GPS when accepted but
+are mostly refused as ambiguous, and with GPS a third were placed 4–12 m off
+with high confidence. See
+[design/guided-mapping.md](design/guided-mapping.md#relocalization-what-we-measured).
