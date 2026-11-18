@@ -20,6 +20,7 @@
 //   observations.asc  how many walks measured the cell
 //   source.asc        which evidence row (1-based) counts most toward the height
 //   spread.asc        how far the farthest walk is from the height (m)
+//   edit_reviews.csv  per edit: cells, and those later walks disagree with
 //   layer.json        how it was made: estimator, settings, inputs, counts
 
 #include <Eigen/Core>
@@ -46,6 +47,7 @@ inline constexpr const char* kProvenance = "provenance.asc";
 inline constexpr const char* kObservations = "observations.asc";
 inline constexpr const char* kSource = "source.asc";
 inline constexpr const char* kSpread = "spread.asc";
+inline constexpr const char* kEditReviews = "edit_reviews.csv";
 inline constexpr const char* kInfo = "layer.json";
 }  // namespace ground_layer_file
 
@@ -114,16 +116,21 @@ struct GroundEdit {
   enum class Kind : std::uint8_t {
     Ground,     // This area is ground: measured stays, the rest is filled.
     NotGround,  // Something stands here: covered, the ground runs on beneath.
+    Boundary,   // The site's boundary runs here instead (boundary.hpp): a line.
   };
   std::string id;
-  std::string time;  // When it was made, ISO 8601.
+  std::string time;  // When it was made, ISO 8601 (UTC).
   Kind kind = Kind::Ground;
-  std::vector<Eigen::Vector2d> polygon;  // Site frame, meters; at least 3 vertices.
+  // Site frame, meters: an area of at least 3 vertices, or for Boundary a
+  // line of at least 2 points.
+  std::vector<Eigen::Vector2d> polygon;
   std::string note;
 };
 
+std::string_view edit_kind_name(GroundEdit::Kind kind);
+
 // edits.csv: `id,time,kind,polygon,note`, polygon as `x y;x y;...`, kind
-// `ground` or `not_ground`. A missing file is no edits. Throws
+// `ground`, `not_ground` or `boundary`. A missing file is no edits. Throws
 // std::runtime_error on a malformed line.
 std::vector<GroundEdit> load_ground_edits(const std::filesystem::path& path);
 void save_ground_edits(const std::vector<GroundEdit>& edits, const std::filesystem::path& path);
@@ -202,6 +209,18 @@ struct GroundLayer {
   // The site's boundary (boundary.hpp), counter-clockwise, if a boundary walk
   // gave one: cells outside it are Outside. Empty if none.
   std::vector<Eigen::Vector2d> boundary;
+  // Per area edit (Ground, NotGround), in order: how many cells it covers, and
+  // how many of them walks recorded after it disagree with (measured ground
+  // under a NotGround edit; saw something standing under a Ground edit), and
+  // which. The edit still wins; these are for the user to look at.
+  struct EditReview {
+    std::string id;
+    GroundEdit::Kind kind = GroundEdit::Kind::Ground;
+    std::size_t cells = 0;
+    std::size_t disagreeing = 0;
+    std::vector<std::string> walks;
+  };
+  std::vector<EditReview> reviews;
 
   std::size_t index(int x, int y) const {
     return static_cast<std::size_t>(y) * static_cast<std::size_t>(heights.width) +
@@ -209,9 +228,13 @@ struct GroundLayer {
   }
 };
 
+// Whether a walk recorded at `recorded` (YYYYMMDD-HHMMSS, as SiteVisit) came
+// after an edit made at `time` (ISO 8601); false if either is unknown.
+bool recorded_after(const std::string& recorded, const std::string& time);
+
 // The ground layer from the walks (oldest first) and edits (applied in
-// order), on a grid in the site frame covering every walk, at the first
-// walk's cell size. Cells under a NotGround edit are Covered and under a
+// order; Boundary edits are the boundary's, not applied here), on a grid in the site frame covering
+// every walk, at the first walk's cell size. Cells under a NotGround edit are Covered and under a
 // Ground edit Measured or Filled; cells left Filled or Covered with no
 // height are filled smoothly from the ground around them.
 GroundLayer estimate_ground(const std::vector<WalkGround>& walks,

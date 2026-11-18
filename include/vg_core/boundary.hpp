@@ -20,7 +20,9 @@
 // On disk, in <site>/layers/boundary/ (Site::make_ground_layer()):
 //
 //   boundary.csv  the site's boundary: one vertex per line, x, y (site frame,
-//                 m), how it was found (structure, ground_end, assumed)
+//                 m), how it was found (structure, ground_end, assumed, edited)
+//   edits.csv     the user's Boundary edits (ground_layer.hpp's format), read
+//                 and applied on every build, never rewritten
 //   walks.csv     each boundary walk: its loop, drift, and agreement with the
 //                 site's boundary
 
@@ -38,6 +40,7 @@ namespace boundary_layer_file {
 inline constexpr const char* kDir = "layers/boundary";
 inline constexpr const char* kBoundary = "boundary.csv";
 inline constexpr const char* kWalks = "walks.csv";
+inline constexpr const char* kEdits = "edits.csv";
 }  // namespace boundary_layer_file
 
 struct BoundaryConfig {
@@ -64,6 +67,7 @@ enum class BoundaryEdge : std::uint8_t {
   Structure,  // A covered cell: a fence, a wall, a hedge.
   GroundEnd,  // Where the seen ground ends.
   Assumed,    // Neither within max_push: assumed_offset out.
+  Edited,     // Drawn by the user (a Boundary edit).
 };
 
 std::string_view boundary_edge_name(BoundaryEdge edge);
@@ -109,6 +113,14 @@ struct BoundaryAgreement {
   double overlap = 0.0;
 };
 BoundaryAgreement compare_boundaries(const Boundary& a, const Boundary& b, double cell = 0.1);
+
+// The user's Boundary edits (others are ignored), in order: each line
+// replaces the stretch of the boundary between the vertices nearest its two
+// ends; of the two ways round between them, the one lying nearer the line
+// (the stretch it redraws). Its points become Edited vertices. Edits are
+// placed by where they are, so they apply to a boundary made again from more
+// walks. Returns how many edits applied (a line needs a boundary to edit).
+std::size_t edit_boundary(Boundary& boundary, const std::vector<GroundEdit>& edits);
 
 // Cells of the ground layer outside the boundary become Outside (no height).
 void apply_boundary(GroundLayer& ground, const Boundary& boundary);

@@ -580,7 +580,10 @@ void Site::make_boundary(GroundLayer& ground, const BoundaryConfig& config,
     walks.push_back({package.filename().string(), estimate_boundary(path, ground, config)});
   }
   if (walks.empty()) {
-    std::filesystem::remove_all(dir);  // No boundary walk (any more): no boundary.
+    // No boundary walk (any more): no boundary. The user's edits stay.
+    std::error_code ignored;
+    std::filesystem::remove(dir / boundary_layer_file::kBoundary, ignored);
+    std::filesystem::remove(dir / boundary_layer_file::kWalks, ignored);
     return;
   }
   std::filesystem::create_directories(dir);
@@ -600,7 +603,7 @@ void Site::make_boundary(GroundLayer& ground, const BoundaryConfig& config,
            "perimeter_m,structure,ground_end,assumed,site,median_apart_m,p90_apart_m,overlap\n";
     for (const Walk& w : walks) {
       const Boundary& b = w.boundary;
-      std::array<std::size_t, 3> by_edge{};
+      std::array<std::size_t, 4> by_edge{};
       for (const BoundaryVertex& v : b.vertices) {
         ++by_edge[static_cast<std::size_t>(v.edge)];
       }
@@ -655,18 +658,26 @@ void Site::make_boundary(GroundLayer& ground, const BoundaryConfig& config,
     std::filesystem::remove(dir / boundary_layer_file::kBoundary);
     return;
   }
+  // The user's edits win over the walks.
+  Boundary boundary = site->boundary;
+  const std::vector<GroundEdit> edits = load_ground_edits(dir / boundary_layer_file::kEdits);
+  const std::size_t applied = edit_boundary(boundary, edits);
+  if (!edits.empty()) {
+    log << "boundary: " << applied << " of " << edits.size() << " edits applied; " << boundary.area
+        << " m^2 inside" << std::endl;
+  }
   {
     std::ofstream out(dir / boundary_layer_file::kBoundary);
     out.imbue(std::locale::classic());
     out.precision(10);
     out << "x,y,edge,push_m\n";
-    for (const BoundaryVertex& v : site->boundary.vertices) {
+    for (const BoundaryVertex& v : boundary.vertices) {
       out << v.position.x() << ',' << v.position.y() << ',' << boundary_edge_name(v.edge) << ','
           << v.push << '\n';
     }
   }
-  apply_boundary(ground, site->boundary);
-  for (const BoundaryVertex& v : site->boundary.vertices) {
+  apply_boundary(ground, boundary);
+  for (const BoundaryVertex& v : boundary.vertices) {
     ground.boundary.push_back(v.position);
   }
 }
@@ -764,6 +775,27 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
     out << "],\n  \"cells\": {\"measured\": " << by_state[1] << ", \"filled\": " << by_state[2]
         << ", \"covered\": " << by_state[3] << ", \"unknown\": " << by_state[4]
         << ", \"outside\": " << by_state[0] << "}\n}\n";
+  }
+  // Each area edit, against the walks recorded after it.
+  {
+    std::ofstream out(dir / ground_layer_file::kEditReviews);
+    out << "id,kind,cells,disagreeing_cells,walks\n";
+    for (const GroundLayer::EditReview& r : layer.reviews) {
+      out << r.id << ',' << edit_kind_name(r.kind) << ',' << r.cells << ',' << r.disagreeing << ',';
+      for (std::size_t k = 0; k < r.walks.size(); ++k) {
+        out << (k > 0 ? ";" : "") << r.walks[k];
+      }
+      out << '\n';
+      if (r.disagreeing > 0) {
+        log << "ground layer: edit " << r.id << " (" << edit_kind_name(r.kind) << "): "
+            << r.disagreeing << " of its " << r.cells << " cells disagree with walks since ("
+            << r.walks.size() << ": ";
+        for (std::size_t k = 0; k < r.walks.size(); ++k) {
+          log << (k > 0 ? ", " : "") << r.walks[k];
+        }
+        log << "); the edit stands, have a look" << std::endl;
+      }
+    }
   }
   log << "ground layer: " << layer.heights.width << " x " << layer.heights.height
       << " cells from " << walks.size() << " walks and " << edits.size() << " edits: measured "

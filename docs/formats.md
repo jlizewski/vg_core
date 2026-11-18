@@ -127,7 +127,8 @@ cell size.
 | `source.asc` | ASCII grid | The `evidence.csv` id counting most toward the height |
 | `spread.asc` | ASCII grid, m | How far the farthest walk is from the height: where walks disagree |
 | `evidence.csv` | CSV | The walks used: `id, package, recorded, yaw_deg, x, y, z`, and how each walk's ground was aligned: `align_cells` (shared with the walks before it), `align_offset_m` at `align_center_x/y`, `align_slope_x/y` (rise per m), `align_before_m` and `align_after_m` (median distance to the walks before it) |
-| `edits.csv` | CSV | The user's edits: `id, time, kind, polygon, note`; kind `ground` or `not_ground`, polygon `x y;x y;...` in the site frame (m), the note is the rest of the line. Read, never rewritten |
+| `edits.csv` | CSV | The user's edits: `id, time, kind, polygon, note`; kind `ground` or `not_ground`, polygon `x y;x y;...` in the site frame (m), time ISO 8601 UTC, the note is the rest of the line. Read, never rewritten (`vg site edit` appends) |
+| `edit_reviews.csv` | CSV | Per edit: `id, kind, cells, disagreeing_cells, walks` (`;`-separated): walks recorded after the edit that disagree with it |
 | `layer.json` | JSON | How it was made: combine rule, alignment and classification settings, cell size, walks, edits applied, cells per state |
 
 ### `layers/boundary/`
@@ -137,8 +138,9 @@ written by `vg site ground` when the site has boundary walks.
 
 | File | Format | Contents |
 | --- | --- | --- |
-| `boundary.csv` | CSV | The site's boundary, counter-clockwise: `x, y` (site frame, m), `edge` (`structure`, `ground_end` or `assumed`), `push_m` (how far out from the walk) |
+| `boundary.csv` | CSV | The site's boundary, counter-clockwise: `x, y` (site frame, m), `edge` (`structure`, `ground_end`, `assumed` or `edited`), `push_m` (how far out from the walk) |
 | `walk-<walk>.csv` | CSV | Each boundary walk's own outline, the same way |
+| `edits.csv` | CSV | The user's boundary lines, in `layers/ground/edits.csv`'s format with kind `boundary` (2 or more points) |
 | `walks.csv` | CSV | Each boundary walk: `closed`, `loop_m`, `gap_m` and `overlap_offset_m` (drift round the loop), `drift_per_100m`, `vertices`, `area_m2`, `perimeter_m`, vertices by edge, whether it's the `site`'s, and its agreement with the site's (`median_apart_m`, `p90_apart_m`, `overlap`) |
 
 ## Planned

@@ -301,7 +301,60 @@ std::vector<WalkObject> load_walk_elements(const std::filesystem::path& path) {
   return elements;
 }
 
+// What a walk saw on a cell it didn't measure as ground.
+enum class Over : std::uint8_t { Nothing = 0, Low = 1, Standing = 2 };
+
+// The walk's state at a cell (GroundCell) and the object over it (-1 none,
+// -2 not known), as resampled onto the site grid.
+Over over_cell(const WalkGround& walk, std::uint8_t state, int object,
+               const GroundLayerConfig& config) {
+  if (object == -2 || (object >= 0 && static_cast<std::size_t>(object) >= walk.objects.size())) {
+    // Not known what's there: under an object counts as covered.
+    return state == static_cast<std::uint8_t>(GroundCell::UnderObject) ? Over::Standing
+                                                                       : Over::Nothing;
+  }
+  if (object < 0) {
+    return Over::Nothing;
+  }
+  const WalkObject& o = walk.objects[static_cast<std::size_t>(object)];
+  if (!o.grounded || o.label == SemanticClass::Ground) {
+    return Over::Nothing;  // Overhangs and stretches of ground don't stand on it.
+  }
+  const bool tall = o.label == SemanticClass::Structure || o.label == SemanticClass::Tree ||
+                    o.top_above_ground >= config.cover_min_height;
+  return tall ? Over::Standing : Over::Low;
+}
+
+// The digits of a time stamp, YYYYMMDDHHMMSS; empty if it hasn't 14.
+std::string stamp_digits(const std::string& time) {
+  std::string digits;
+  for (const char c : time) {
+    if (c >= '0' && c <= '9') {
+      digits += c;
+    }
+  }
+  return digits.size() >= 14 ? digits.substr(0, 14) : std::string();
+}
+
 }  // namespace
+
+std::string_view edit_kind_name(GroundEdit::Kind kind) {
+  switch (kind) {
+    case GroundEdit::Kind::Ground:
+      return "ground";
+    case GroundEdit::Kind::NotGround:
+      return "not_ground";
+    case GroundEdit::Kind::Boundary:
+      return "boundary";
+  }
+  return "ground";
+}
+
+bool recorded_after(const std::string& recorded, const std::string& time) {
+  const std::string a = stamp_digits(recorded);
+  const std::string b = stamp_digits(time);
+  return !a.empty() && !b.empty() && a > b;
+}
 
 WalkGround load_walk_ground(const std::filesystem::path& package) {
   for (const char* file :
@@ -387,9 +440,11 @@ std::vector<GroundEdit> load_ground_edits(const std::filesystem::path& path) {
       edit.kind = GroundEdit::Kind::Ground;
     } else if (fields[2] == "not_ground") {
       edit.kind = GroundEdit::Kind::NotGround;
+    } else if (fields[2] == "boundary") {
+      edit.kind = GroundEdit::Kind::Boundary;
     } else {
       throw std::runtime_error("ground edits: kind '" + fields[2] + "' in " + where +
-                               " (ground or not_ground)");
+                               " (ground, not_ground or boundary)");
     }
     std::istringstream vertices(fields[3]);
     std::string vertex;
@@ -401,8 +456,10 @@ std::vector<GroundEdit> load_ground_edits(const std::filesystem::path& path) {
       edit.polygon.emplace_back(parse_number(vertex.substr(0, space), where),
                                 parse_number(vertex.substr(space + 1), where));
     }
-    if (edit.polygon.size() < 3) {
-      throw std::runtime_error("ground edits: a polygon needs 3 vertices, in " + where);
+    if (edit.polygon.size() < (edit.kind == GroundEdit::Kind::Boundary ? 2u : 3u)) {
+      throw std::runtime_error(edit.kind == GroundEdit::Kind::Boundary
+                                   ? "ground edits: a boundary line needs 2 points, in " + where
+                                   : "ground edits: an area needs 3 vertices, in " + where);
     }
     edit.note = line.substr(start);
     edits.push_back(std::move(edit));
@@ -416,8 +473,7 @@ void save_ground_edits(const std::vector<GroundEdit>& edits, const std::filesyst
   out.precision(10);
   out << "id,time,kind,polygon,note\n";
   for (const GroundEdit& e : edits) {
-    out << e.id << ',' << e.time << ','
-        << (e.kind == GroundEdit::Kind::Ground ? "ground" : "not_ground") << ',';
+    out << e.id << ',' << e.time << ',' << edit_kind_name(e.kind) << ',';
     for (std::size_t i = 0; i < e.polygon.size(); ++i) {
       out << (i > 0 ? ";" : "") << e.polygon[i].x() << ' ' << e.polygon[i].y();
     }
@@ -583,10 +639,7 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
   // The rest, by what stands on them in any walk: a structure, a tree or
   // anything tall covers the ground; anything lower (plants) leaves it
   // filled. Overhangs and objects labeled ground don't stand on it.
-  constexpr std::uint8_t kNothing = 0;
-  constexpr std::uint8_t kLow = 1;
-  constexpr std::uint8_t kStanding = 2;
-  std::vector<std::uint8_t> over(cells, kNothing);
+  std::vector<Over> over(cells, Over::Nothing);
   std::vector<char> known(cells, 0);  // Some walk knew something of the cell.
   for (std::size_t i = 0; i < cells; ++i) {
     if (layer.state[i] == GroundState::Measured) {
@@ -598,24 +651,10 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
         continue;
       }
       known[i] = 1;
-      const int o = grid[k].object[i];
-      std::uint8_t what = kNothing;
-      if (o == -2 || (o >= 0 && static_cast<std::size_t>(o) >= walks[k].objects.size())) {
-        // Not known what's there: under an object counts as covered.
-        what = s == static_cast<std::uint8_t>(GroundCell::UnderObject) ? kStanding : kNothing;
-      } else if (o >= 0) {
-        const WalkObject& object = walks[k].objects[static_cast<std::size_t>(o)];
-        if (object.grounded && object.label != SemanticClass::Ground) {
-          const bool tall = object.label == SemanticClass::Structure ||
-                            object.label == SemanticClass::Tree ||
-                            object.top_above_ground >= config.cover_min_height;
-          what = tall ? kStanding : kLow;
-        }
-      }
-      over[i] = std::max(over[i], what);
+      over[i] = std::max(over[i], over_cell(walks[k], s, grid[k].object[i], config));
     }
-    if (over[i] != kNothing) {
-      layer.state[i] = over[i] == kStanding ? GroundState::Covered : GroundState::Filled;
+    if (over[i] != Over::Nothing) {
+      layer.state[i] = over[i] == Over::Standing ? GroundState::Covered : GroundState::Filled;
       layer.provenance[i] = Provenance::Inferred;
     }
   }
@@ -676,6 +715,13 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
   // The user's edits, in order: the ground under them is filled afresh from
   // the ground around them.
   for (const GroundEdit& edit : edits) {
+    if (edit.kind == GroundEdit::Kind::Boundary) {
+      continue;  // The boundary's (boundary.hpp).
+    }
+    GroundLayer::EditReview review;
+    review.id = edit.id;
+    review.kind = edit.kind;
+    std::vector<char> disagrees(walks.size(), 0);
     Eigen::Vector2d a = edit.polygon.front();
     Eigen::Vector2d b = a;
     for (const Eigen::Vector2d& p : edit.polygon) {
@@ -695,6 +741,23 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
           continue;
         }
         const std::size_t i = layer.index(x, y);
+        // Walks recorded after the edit that disagree with it here.
+        ++review.cells;
+        bool disagreeing = false;
+        for (std::size_t k = 0; k < walks.size(); ++k) {
+          if (!recorded_after(walks[k].recorded, edit.time) || grid[k].state[i] == 0) {
+            continue;
+          }
+          const bool against = edit.kind == GroundEdit::Kind::NotGround
+                                   ? grid[k].state[i] == kMeasured
+                                   : over_cell(walks[k], grid[k].state[i], grid[k].object[i],
+                                               config) == Over::Standing;
+          if (against) {
+            disagrees[k] = 1;
+            disagreeing = true;
+          }
+        }
+        review.disagreeing += disagreeing ? 1 : 0;
         if (edit.kind == GroundEdit::Kind::Ground && layer.state[i] == GroundState::Measured) {
           continue;  // Seen as ground already.
         }
@@ -706,6 +769,12 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
         layer.spread[i] = kNaN;
       }
     }
+    for (std::size_t k = 0; k < walks.size(); ++k) {
+      if (disagrees[k]) {
+        review.walks.push_back(walks[k].id);
+      }
+    }
+    layer.reviews.push_back(std::move(review));
   }
 
   // Filled or covered cells with no height yet: smoothly from around them.

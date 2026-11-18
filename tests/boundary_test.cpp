@@ -134,4 +134,33 @@ TEST(Boundary, CellsOutsideAreOutside) {
   EXPECT_EQ(g.state[g.index(50, 5)], GroundState::Outside);  // (10, 1): south of it.
 }
 
+TEST(Boundary, AnEditRedrawsAStretch) {
+  // The south side was assumed (open ground); the user draws it 0.5 m in.
+  vg::Boundary b = vg::estimate_boundary(square_walk(), yard());
+  vg::GroundEdit e;
+  e.id = "gate";
+  e.kind = vg::GroundEdit::Kind::Boundary;
+  e.polygon = {{6.0, 4.5}, {10.0, 4.5}, {14.0, 4.5}};
+  vg::GroundEdit area;  // Area edits aren't the boundary's.
+  area.kind = vg::GroundEdit::Kind::NotGround;
+  area.polygon = {{0, 0}, {1, 0}, {1, 1}};
+  EXPECT_EQ(vg::edit_boundary(b, {area, e}), 1u);
+
+  const vg::BoundaryVertex& mid = nearest(b, {10.0, 4.0});
+  EXPECT_EQ(mid.edge, BoundaryEdge::Edited);
+  EXPECT_DOUBLE_EQ(mid.position.y(), 4.5);
+  for (const vg::BoundaryVertex& v : b.vertices) {  // The old stretch is gone...
+    if (v.position.x() > 6.5 && v.position.x() < 13.5) {
+      EXPECT_FALSE(std::abs(v.position.y() - 4.0) < 0.05) << v.position.transpose();
+    }
+  }
+  EXPECT_EQ(nearest(b, {3.0, 10.0}).edge, BoundaryEdge::Structure);  // ... the rest stays.
+  EXPECT_NEAR(b.area, vg::estimate_boundary(square_walk(), yard()).area - 0.5 * 8.0, 2.0);
+
+  // Placed by where it is: the same edit on the boundary made again agrees.
+  vg::Boundary again = vg::estimate_boundary(square_walk(), yard());
+  vg::edit_boundary(again, {e});
+  EXPECT_NEAR(vg::compare_boundaries(b, again).median_distance, 0.0, 1e-9);
+}
+
 }  // namespace

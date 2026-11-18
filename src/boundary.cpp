@@ -140,6 +140,8 @@ std::string_view boundary_edge_name(BoundaryEdge edge) {
       return "ground_end";
     case BoundaryEdge::Assumed:
       return "assumed";
+    case BoundaryEdge::Edited:
+      return "edited";
   }
   return "assumed";
 }
@@ -326,6 +328,99 @@ BoundaryAgreement compare_boundaries(const Boundary& a, const Boundary& b, doubl
   }
   agreement.overlap = either > 0 ? static_cast<double>(both) / static_cast<double>(either) : 0.0;
   return agreement;
+}
+
+std::size_t edit_boundary(Boundary& boundary, const std::vector<GroundEdit>& edits) {
+  std::size_t applied = 0;
+  for (const GroundEdit& edit : edits) {
+    std::vector<BoundaryVertex>& v = boundary.vertices;
+    if (edit.kind != GroundEdit::Kind::Boundary || edit.polygon.size() < 2 || v.size() < 3) {
+      continue;
+    }
+    const std::vector<Eigen::Vector2d>& line = edit.polygon;
+    const auto nearest = [&](const Eigen::Vector2d& p) {
+      std::size_t best = 0;
+      for (std::size_t i = 1; i < v.size(); ++i) {
+        if ((v[i].position - p).squaredNorm() < (v[best].position - p).squaredNorm()) {
+          best = i;
+        }
+      }
+      return best;
+    };
+    const std::size_t a = nearest(line.front());
+    const std::size_t b = nearest(line.back());
+    const std::size_t n = v.size();
+    if (a == b) {
+      continue;
+    }
+    // The two ways round from a to b (forward, a..b) and back, by how near
+    // their vertices lie to the line, on average.
+    const auto from_line = [&](std::size_t i) {
+      double best = std::numeric_limits<double>::infinity();
+      for (std::size_t k = 1; k < line.size(); ++k) {
+        const Eigen::Vector2d ab = line[k] - line[k - 1];
+        const double len2 = ab.squaredNorm();
+        const double t =
+            len2 > 0.0 ? std::clamp((v[i].position - line[k - 1]).dot(ab) / len2, 0.0, 1.0) : 0.0;
+        best = std::min(best, (line[k - 1] + t * ab - v[i].position).norm());
+      }
+      return best;
+    };
+    const auto mean_from_line = [&](std::size_t from, std::size_t to) {
+      double sum = 0.0;
+      std::size_t count = 0;
+      for (std::size_t i = from;; i = (i + 1) % n) {
+        sum += from_line(i);
+        ++count;
+        if (i == to) {
+          break;
+        }
+      }
+      return sum / static_cast<double>(count);
+    };
+    const bool forward = mean_from_line(a, b) <= mean_from_line(b, a);
+    // Keep the other way round, then the line closes the ring.
+    std::vector<BoundaryVertex> kept;
+    std::vector<Eigen::Vector2d> drawn = line;
+    if (forward) {  // Replace a..b: keep b..a, then the line from a's end to b's.
+      for (std::size_t i = b;; i = (i + 1) % n) {
+        kept.push_back(v[i]);
+        if (i == a) {
+          break;
+        }
+      }
+    } else {  // Replace b..a: keep a..b, then the line back from b's end to a's.
+      for (std::size_t i = a;; i = (i + 1) % n) {
+        kept.push_back(v[i]);
+        if (i == b) {
+          break;
+        }
+      }
+      std::reverse(drawn.begin(), drawn.end());
+    }
+    // The kept stretch's end vertices give way to the line's own ends.
+    kept.pop_back();
+    kept.erase(kept.begin());
+    for (const Eigen::Vector2d& p : drawn) {
+      BoundaryVertex x;
+      x.position = p;
+      x.edge = BoundaryEdge::Edited;
+      kept.push_back(x);
+    }
+    v = std::move(kept);
+    std::vector<Eigen::Vector2d> ring = positions(boundary);
+    if (twice_area(ring) < 0.0) {
+      std::reverse(v.begin(), v.end());
+      ring = positions(boundary);
+    }
+    boundary.area = 0.5 * std::abs(twice_area(ring));
+    boundary.perimeter = 0.0;
+    for (std::size_t i = 0, j = ring.size() - 1; i < ring.size(); j = i++) {
+      boundary.perimeter += (ring[i] - ring[j]).norm();
+    }
+    ++applied;
+  }
+  return applied;
 }
 
 void apply_boundary(GroundLayer& ground, const Boundary& boundary) {

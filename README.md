@@ -477,6 +477,7 @@ vg site list garden-site                       # the visits, their alignment and
 vg site maps garden-site                       # remake current/ only
 vg site ground garden-site                     # the ground layer: every walk combined, with edits;
                                                # features; the boundary from boundary walks
+vg site edit garden-site boundary "x y;x y" gate  # a correction (also ground / not_ground areas)
 ```
 
 - The first walk added sets the site's frame. Each later one is registered

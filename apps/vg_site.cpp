@@ -3,7 +3,13 @@
 //   vg_site add <site_dir> <package>... [--force] [--config FILE] [--set PATH=VALUE] [flags]
 //   vg_site maps <site_dir>
 //   vg_site ground <site_dir>
+//   vg_site edit <site_dir> ground|not_ground|boundary "x y;x y;..." [note]
 //   vg_site list <site_dir>
+//
+// edit adds a correction (an area that is or isn't ground, or a line the
+// boundary runs along instead, in the site frame) and remakes the layers. Edits
+// are kept in layers/ground/edits.csv and layers/boundary/edits.csv and win
+// over what walks measure; walks recorded later that disagree are reported.
 //
 // ground builds the site's ground layer (layers/ground/, see
 // vg_core/ground_layer.hpp): every visit's ground combined, with the edits in
@@ -39,6 +45,7 @@ int usage(const vg::config::ParamSet& params) {
   std::cerr << "usage: vg_site add <site_dir> <package>... [--force] [settings]\n"
                "       vg_site maps <site_dir>\n"
                "       vg_site ground <site_dir>\n"
+               "       vg_site edit <site_dir> ground|not_ground|boundary \"x y;x y;...\" [note]\n"
                "       vg_site list <site_dir>\n"
             << params.flags_help();
   return 2;
@@ -75,6 +82,25 @@ int main(int argc, char** argv) {
   }
   const std::string command = args[0];
   const std::filesystem::path site_dir = args[1];
+  if (command == "edit") {
+    if (args.size() < 4) {
+      return usage(params);
+    }
+    std::string note;
+    for (std::size_t i = 4; i < args.size(); ++i) {
+      note += (i > 4 ? " " : "") + args[i];
+    }
+    try {
+      vg::config::add_site_edit(site_dir, args[2], args[3], note, std::cout);
+      return 0;
+    } catch (const vg::config::ConfigError& e) {
+      std::cerr << "vg_site: " << e.what() << "\n";
+      return 2;
+    } catch (const std::exception& e) {
+      std::cerr << "vg_site: " << e.what() << "\n";
+      return 1;
+    }
+  }
   std::vector<std::filesystem::path> packages;
   std::vector<std::string> settings;
   bool force = false;

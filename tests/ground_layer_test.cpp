@@ -334,6 +334,42 @@ TEST(GroundLayer, ClassifiesWhatStandsOnTheGroundAndTheHoles) {
   EXPECT_EQ(vg::estimate_ground({w}, {}, low).state[layer.index(12, 4)], GroundState::Covered);
 }
 
+TEST(GroundLayer, ReviewsEditsAgainstLaterWalks) {
+  // The user said the middle isn't ground on 2026-11-10; a walk from before
+  // measured ground there (no matter), one from after too (disagrees).
+  vg::WalkGround before = grid_walk("before", 30, slope_ground);
+  before.recorded = "20261109-120000";
+  vg::WalkGround after = grid_walk("after", 30, slope_ground);
+  after.recorded = "20261111-090000";
+  GroundEdit deck;
+  deck.id = "deck";
+  deck.time = "2026-11-10T18:30:00Z";
+  deck.kind = GroundEdit::Kind::NotGround;
+  deck.polygon = {{2.0, 2.0}, {4.0, 2.0}, {4.0, 4.0}, {2.0, 4.0}};
+  const vg::GroundLayer layer = vg::estimate_ground({before, after}, {deck});
+  ASSERT_EQ(layer.reviews.size(), 1u);
+  const auto& review = layer.reviews[0];
+  EXPECT_EQ(review.id, "deck");
+  EXPECT_EQ(review.cells, 100u);  // 2 x 2 m of 0.2 m cells.
+  EXPECT_EQ(review.disagreeing, 100u);
+  ASSERT_EQ(review.walks.size(), 1u);
+  EXPECT_EQ(review.walks[0], "after");
+  // The edit still wins.
+  EXPECT_EQ(layer.state[layer.index(15, 15)], GroundState::Covered);
+  EXPECT_EQ(layer.provenance[layer.index(15, 15)], Provenance::Edited);
+
+  // Made after both walks: nothing to disagree with yet.
+  deck.time = "2026-11-12T08:00:00Z";
+  EXPECT_EQ(vg::estimate_ground({before, after}, {deck}).reviews[0].disagreeing, 0u);
+}
+
+TEST(GroundLayer, RecordedAfterComparesStamps) {
+  EXPECT_TRUE(vg::recorded_after("20261111-090000", "2026-11-10T18:30:00Z"));
+  EXPECT_FALSE(vg::recorded_after("20261109-120000", "2026-11-10T18:30:00Z"));
+  EXPECT_FALSE(vg::recorded_after("", "2026-11-10T18:30:00Z"));
+  EXPECT_FALSE(vg::recorded_after("20261111-090000", "yesterday"));
+}
+
 TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {
   const std::vector<GroundEdit> edits = {
       edit(GroundEdit::Kind::NotGround, 0.0, 1.0, "deck"),  // Over measured cell 0.

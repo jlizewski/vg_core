@@ -273,6 +273,44 @@ TEST_F(SiteTest, MakesTheBoundaryFromABoundaryWalk) {
   EXPECT_LT(static_cast<double>(inside) * cell * cell, 7.0);  // Within ~2.5 x 2.5 m.
 }
 
+TEST_F(SiteTest, EditsSurviveAddingAWalkAndLaterWalksAreReviewed) {
+  // A not-ground edit made between the two walks (2026-10-09 and -16).
+  vg::Site site(root_ / "site");
+  site.add(root_ / "walks" / "recording-20261009-175006", {}, log_);
+  vg::GroundEdit shed;
+  shed.id = "edit-1";
+  shed.time = "2026-10-12T10:00:00Z";
+  shed.kind = vg::GroundEdit::Kind::NotGround;
+  shed.polygon = {{-0.5, -0.5}, {0.0, -0.5}, {0.0, 0.0}, {-0.5, 0.0}};
+  const fs::path edits = root_ / "site" / vg::ground_layer_file::kDir / vg::ground_layer_file::kEdits;
+  fs::create_directories(edits.parent_path());
+  vg::save_ground_edits({shed}, edits);
+  const vg::GroundLayer one = site.make_ground_layer(log_);
+  ASSERT_EQ(one.reviews.size(), 1u);
+  EXPECT_GT(one.reviews[0].cells, 0u);
+  EXPECT_EQ(one.reviews[0].disagreeing, 0u);  // The walk is from before the edit.
+
+  // A later walk measures ground there: the edit stands, flagged.
+  site.add(root_ / "walks" / "recording-20261016-115329", {}, log_, true);
+  const vg::GroundLayer two = site.make_ground_layer(log_);
+  ASSERT_EQ(two.reviews.size(), 1u);
+  EXPECT_GT(two.reviews[0].disagreeing, 0u);
+  ASSERT_EQ(two.reviews[0].walks.size(), 1u);
+  EXPECT_EQ(two.reviews[0].walks[0], "recording-20261016-115329");
+  std::size_t edited = 0;
+  for (std::size_t i = 0; i < two.state.size(); ++i) {
+    if (two.provenance[i] == vg::Provenance::Edited) {
+      ++edited;
+      EXPECT_EQ(two.state[i], vg::GroundState::Covered);
+    }
+  }
+  EXPECT_GT(edited, 0u);
+  EXPECT_NE(log_.str().find("the edit stands"), std::string::npos);
+  EXPECT_NE(read_all(root_ / "site" / vg::ground_layer_file::kDir / vg::ground_layer_file::kEditReviews)
+                .find("edit-1,not_ground,"),
+            std::string::npos);
+}
+
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
   const fs::path root = fs::temp_directory_path() / "vg_site_model_test";
   fs::remove_all(root);

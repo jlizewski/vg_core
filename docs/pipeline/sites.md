@@ -199,6 +199,35 @@ loops of 103 and 100 m, back within 20 and 8 cm of their starts; 365 and
 areas overlapping 96%. The edge was a structure at 41% of the points, the
 end of the seen ground at 52%, assumed at 7%.
 
+## Edits
+
+The user's corrections win over what walks measure (D16). Each is a line in
+an edits file, made with `vg site edit` (or by hand), and applied on every
+build:
+
+```sh
+vg site edit garden-site not_ground "x y;x y;x y;..." the deck   # an area that isn't ground
+vg site edit garden-site ground "x y;x y;x y;..." lawn           # an area that is
+vg site edit garden-site boundary "x y;x y" across the gate      # where the boundary runs
+```
+
+- **Areas** (`layers/ground/edits.csv`): *not ground* covers them, *ground*
+  fills what wasn't measured; either way the ground beneath is filled afresh
+  from the ground around.
+- **Boundary lines** (`layers/boundary/edits.csv`): a line replaces the stretch
+  of the boundary between the points nearest its ends (of the two ways round,
+  the one nearer the line). They're placed by where they are, so they still
+  apply when the boundary is made again from more walks.
+- **Reviews**: walks recorded *after* an area edit that disagree with it
+  (ground measured under *not ground*, something standing under *ground*)
+  are counted per edit in `layers/ground/edit_reviews.csv` and reported; the
+  edit stands until the user changes it.
+
+On the yard, a boundary walk's path went round a raised bed against the
+fence and came back through a gate, so its boundary dipped 2 m into the yard
+there (all assumed points); one line across the gate put it back on the
+fence.
+
 ## What sites don't do yet
 
 - Sun maps over the site's combined maps and canopy.

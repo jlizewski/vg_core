@@ -1,6 +1,10 @@
 #include "vg_core/config/jobs.hpp"
 
 #include <algorithm>
+#include <locale>
+#include <sstream>
+#include <iomanip>
+#include <ctime>
 #include <fstream>
 #include <string>
 #include <map>
@@ -135,6 +139,68 @@ bool add_to_site(const std::filesystem::path& site_dir,
   }
   site.make_maps(log, config.sky.config);
   return all_added;
+}
+
+std::string add_site_edit(const std::filesystem::path& site_dir, const std::string& kind,
+                          const std::string& points, const std::string& note,
+                          std::ostream& log) {
+  GroundEdit e;
+  if (kind == "ground") {
+    e.kind = GroundEdit::Kind::Ground;
+  } else if (kind == "not_ground") {
+    e.kind = GroundEdit::Kind::NotGround;
+  } else if (kind == "boundary") {
+    e.kind = GroundEdit::Kind::Boundary;
+  } else {
+    throw ConfigError("edit: kind must be ground, not_ground or boundary, not '" + kind + "'");
+  }
+  std::istringstream vertices(points);
+  for (std::string vertex; std::getline(vertices, vertex, ';');) {
+    std::istringstream xy(vertex);
+    xy.imbue(std::locale::classic());
+    double x = 0.0;
+    double y = 0.0;
+    if (!(xy >> x >> y)) {
+      throw ConfigError("edit: point '" + vertex + "' isn't `x y`");
+    }
+    e.polygon.emplace_back(x, y);
+  }
+  const bool line = e.kind == GroundEdit::Kind::Boundary;
+  if (e.polygon.size() < (line ? 2u : 3u)) {
+    throw ConfigError(line ? "edit: a boundary line needs at least 2 points"
+                           : "edit: an area needs at least 3 points");
+  }
+  if (note.find('\n') != std::string::npos) {
+    throw ConfigError("edit: the note must be one line");
+  }
+  e.note = note;
+  // The time now, UTC, ISO 8601.
+  const std::time_t now = std::time(nullptr);
+  std::tm utc{};
+#ifdef _WIN32
+  gmtime_s(&utc, &now);
+#else
+  gmtime_r(&now, &utc);
+#endif
+  std::ostringstream time;
+  time << std::put_time(&utc, "%Y-%m-%dT%H:%M:%SZ");
+  e.time = time.str();
+
+  // Ids run across both layers' edits.
+  const auto ground_file = site_dir / ground_layer_file::kDir / ground_layer_file::kEdits;
+  const auto boundary_file = site_dir / boundary_layer_file::kDir / boundary_layer_file::kEdits;
+  std::vector<GroundEdit> ground = load_ground_edits(ground_file);
+  std::vector<GroundEdit> boundary = load_ground_edits(boundary_file);
+  e.id = "edit-" + std::to_string(ground.size() + boundary.size() + 1);
+  std::vector<GroundEdit>& into = line ? boundary : ground;
+  const auto& file = line ? boundary_file : ground_file;
+  into.push_back(e);
+  std::filesystem::create_directories(file.parent_path());
+  save_ground_edits(into, file);
+  log << "edit: " << e.id << " (" << kind << ", " << e.polygon.size() << " points) -> "
+      << file.string() << std::endl;
+  make_site_ground(site_dir, {}, log);
+  return e.id;
 }
 
 void make_site_ground(const std::filesystem::path& site_dir,
