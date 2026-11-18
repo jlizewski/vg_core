@@ -471,6 +471,20 @@ ParamSet bind(MappingConfig& c) {
         "Each point's outward direction is taken across this much of the path on each side (m), "
         "so it turns gradually round a corner.");
 
+  p.section("guidance",
+            "Where to go and look to finish the ground (vg site ground, layers/guidance/): the "
+            "unknown holes inside the boundary, with spots to look at each from.");
+  GuidanceConfig& gc = c.guidance;
+  p.add("guidance.min_view", gc.min_view,
+        "A spot to look from is at least this far from the hole (m)...");
+  p.add("guidance.max_view", gc.max_view,
+        "... and sees hole cells up to this far (m); phone depth reaches 3-5 m.");
+  p.add("guidance.coverage_goal", gc.coverage_goal,
+        "Spots are added until this share of the hole is in view...");
+  p.add("guidance.max_spots", gc.max_spots, "... or this many are chosen.");
+  p.add("guidance.min_area", gc.min_area,
+        "Holes smaller than this (m^2) don't keep the ground from being done.");
+
   p.section("features",
             "The site's feature elements (vg site ground, layers/features/): what stands on the "
             "ground, as posts, lines and blocks, matched across walks.");

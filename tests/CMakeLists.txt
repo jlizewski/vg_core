@@ -23,6 +23,7 @@ add_executable(vg_core_tests
   features_test.cpp
   geo_reference_test.cpp
   ground_layer_test.cpp
+  guidance_test.cpp
   ground_segmentation_test.cpp
   height_map_io_test.cpp
   map_builder_test.cpp

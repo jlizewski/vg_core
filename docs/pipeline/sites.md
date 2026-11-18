@@ -210,6 +210,24 @@ loops of 103 and 100 m, back within 20 and 8 cm of their starts; 365 and
 areas overlapping 96%. The edge was a structure at 41% of the points, the
 end of the seen ground at 52%, assumed at 7%.
 
+## Ground-fill guidance
+
+`vg site ground` also plans where to go and look to finish the ground
+([guidance.hpp](../../include/vg_core/guidance.hpp)), in `layers/guidance/`:
+
+- **Targets**: each connected region of unknown ground inside the boundary,
+  largest first.
+- **Spots to look from**: measured ground (somewhere to stand) 1-3 m from the
+  hole, each seeing as much of it as it can in a straight line not crossing
+  a covered cell (a wall, a fence, a bed); added one at a time until 90% of
+  the hole is in view (at most 3), each with the way to face.
+- **Order**: nearest next, from the site's origin (where its first walk
+  began).
+- **Done**: no unknown hole left (of at least `guidance.min_area`).
+
+On the yard after its guided walks: 3 holes (8.1 m²), 4 spots, each hole
+98-100% in view from its spots.
+
 ## Edits
 
 The user's corrections win over what walks measure (D16). Each is a line in

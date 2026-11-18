@@ -846,7 +846,8 @@ void Site::make_boundary(GroundLayer& ground, const BoundaryConfig& config,
 }
 
 GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& config,
-                                   const BoundaryConfig& boundary_config) const {
+                                   const BoundaryConfig& boundary_config,
+                                   const GuidanceConfig& guidance_config) const {
   const auto start = std::chrono::steady_clock::now();
   const auto dir = dir_ / ground_layer_file::kDir;
   std::filesystem::create_directories(dir);
@@ -974,6 +975,60 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
       << by_state[1] << ", filled " << by_state[2] << ", covered " << by_state[3]
       << ", unknown " << by_state[4] << " -> " << ground_layer_file::kDir << "/ ("
       << seconds_since(start) << " s)" << std::endl;
+
+  // Where to go and look: from the site's origin, where its first walk began.
+  const Guidance guidance = plan_guidance(layer, Eigen::Vector2d::Zero(), guidance_config);
+  {
+    const auto guidance_dir = dir_ / guidance_file::kDir;
+    std::filesystem::create_directories(guidance_dir);
+    std::ofstream out(guidance_dir / guidance_file::kTargets);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "target,order,area_m2,cells,center_x,center_y,seen,spot,spot_x,spot_y,heading_deg,"
+           "distance_m,sees\n";
+    double unknown = 0.0;
+    std::size_t spots = 0;
+    for (const GuidanceTarget& t : guidance.targets) {
+      unknown += t.area;
+      const auto head = [&](std::ostream& o) {
+        o << t.rank << ',' << t.order << ',' << t.area << ',' << t.cells << ',' << t.center.x()
+          << ',' << t.center.y() << ',' << t.seen << ',';
+      };
+      if (t.spots.empty()) {
+        head(out);
+        out << ",,,,,\n";
+      }
+      for (std::size_t k = 0; k < t.spots.size(); ++k) {
+        const LookSpot& s = t.spots[k];
+        head(out);
+        out << k + 1 << ',' << s.position.x() << ',' << s.position.y() << ','
+            << s.heading * 180.0 / kPi << ',' << s.distance << ',' << s.sees << '\n';
+        ++spots;
+      }
+    }
+    std::ofstream summary(guidance_dir / guidance_file::kSummary);
+    summary.imbue(std::locale::classic());
+    summary << "{\n  \"done\": " << (guidance.done ? "true" : "false")
+            << ",\n  \"targets\": " << guidance.targets.size() << ",\n  \"spots\": " << spots
+            << ",\n  \"unknown_m2\": " << unknown << "\n}\n";
+    log << "guidance: " << (guidance.done ? "the ground is done" : "the ground isn't done") << ": "
+        << guidance.targets.size() << " holes (" << unknown << " m^2) to look at, from " << spots
+        << " spots -> " << guidance_file::kDir << "/" << std::endl;
+    for (const GuidanceTarget& t : guidance.targets) {
+      log << "guidance: #" << t.order << " (hole " << t.rank << ", " << t.area << " m^2 at "
+          << t.center.x() << ", " << t.center.y() << "): ";
+      if (t.spots.empty()) {
+        log << "no spot to see it from" << std::endl;
+        continue;
+      }
+      for (std::size_t k = 0; k < t.spots.size(); ++k) {
+        const LookSpot& s = t.spots[k];
+        log << (k > 0 ? "; " : "") << "stand at " << s.position.x() << ", " << s.position.y()
+            << " facing " << s.heading * 180.0 / kPi << " deg (sees " << 100.0 * s.sees << "%)";
+      }
+      log << "; " << 100.0 * t.seen << "% in view" << std::endl;
+    }
+  }
   write_model(log);
   return layer;
 }

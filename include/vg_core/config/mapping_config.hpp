@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "vg_core/boundary.hpp"
+#include "vg_core/guidance.hpp"
 #include "vg_core/config/params.hpp"
 #include "vg_core/features.hpp"
 #include "vg_core/ground_layer.hpp"
@@ -79,6 +80,8 @@ struct MappingConfig {
   FeatureConfig features;
   // boundary: the site's edge from its boundary walks (vg site ground).
   BoundaryConfig boundary;
+  // guidance: where to go and look to finish the ground (vg site ground).
+  GuidanceConfig guidance;
 
   // Derived stages vg replay runs after the build, in order.
   std::vector<std::string> pipeline;

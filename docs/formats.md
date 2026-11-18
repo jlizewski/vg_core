@@ -147,6 +147,16 @@ written by `vg site ground` when the site has boundary walks.
 | `edits.csv` | CSV | The user's boundary lines, in `layers/ground/edits.csv`'s format with kind `boundary` (2 or more points) |
 | `walks.csv` | CSV | Each boundary walk: `closed`, `loop_m`, `gap_m` and `overlap_offset_m` (drift round the loop), `drift_per_100m`, `vertices`, `area_m2`, `perimeter_m`, vertices by edge, whether it's the `site`'s, and its agreement with the site's (`median_apart_m`, `p90_apart_m`, `overlap`) |
 
+### `layers/guidance/`
+
+Ground-fill guidance ([guidance.hpp](../include/vg_core/guidance.hpp)), written
+by `vg site ground`.
+
+| File | Format | Contents |
+| --- | --- | --- |
+| `targets.csv` | CSV | One line per spot to look from: `target` (rank, 1 = largest), `order` (when to visit), `area_m2`, `cells`, `center_x`, `center_y`, `seen` (share in view from all its spots), `spot` (1, 2, ...), `spot_x`, `spot_y`, `heading_deg` (which way to face), `distance_m`, `sees`; a hole with no spot has the spot fields empty |
+| `guidance.json` | JSON | `done`, `targets`, `spots`, `unknown_m2` |
+
 ## Planned
 
 - **Garden model** storage inside the site directory:

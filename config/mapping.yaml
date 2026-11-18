@@ -381,6 +381,20 @@ boundary:
   # side (m), so it turns gradually round a corner.
   normal_span: 1
 
+# Where to go and look to finish the ground (vg site ground, layers/guidance/):
+# the unknown holes inside the boundary, with spots to look at each from.
+guidance:
+  # A spot to look from is at least this far from the hole (m)...
+  min_view: 1
+  # ... and sees hole cells up to this far (m); phone depth reaches 3-5 m.
+  max_view: 3
+  # Spots are added until this share of the hole is in view...
+  coverage_goal: 0.9
+  # ... or this many are chosen.
+  max_spots: 3
+  # Holes smaller than this (m^2) don't keep the ground from being done.
+  min_area: 0
+
 # The site's feature elements (vg site ground, layers/features/): what stands on
 # the ground, as posts, lines and blocks, matched across walks.
 features:

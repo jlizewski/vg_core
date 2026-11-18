@@ -215,7 +215,7 @@ void make_site_ground(const std::filesystem::path& site_dir,
   for (const SiteVisit& visit : site.visits()) {
     prepare_for_site(site.package_dir(visit), log);
   }
-  site.make_ground_layer(log, config.ground_layer, config.boundary);
+  site.make_ground_layer(log, config.ground_layer, config.boundary, config.guidance);
   site.make_feature_layer(log, config.features);
 }
 

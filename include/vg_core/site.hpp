@@ -24,6 +24,7 @@
 //     features/         posts, lines and blocks, matched across visits
 //                       (features.hpp)
 //     boundary/         the site's edge, from its boundary walks (boundary.hpp)
+//     guidance/         where to go and look to finish the ground (guidance.hpp)
 //
 // The first visit defines the site frame. Each later one is registered
 // against all the visits before it, combined. Packages stay where they are;
@@ -38,6 +39,7 @@
 #include "vg_core/boundary.hpp"
 #include "vg_core/features.hpp"
 #include "vg_core/ground_layer.hpp"
+#include "vg_core/guidance.hpp"
 #include "vg_core/registration.hpp"
 #include "vg_core/sky.hpp"
 #include "vg_core/surface_mesh.hpp"
@@ -98,8 +100,10 @@ class Site {
   // and, with boundary walks among the visits, the site's boundary
   // (boundary.hpp, layers/boundary/), outside which the ground is Outside.
   // Throws std::runtime_error if a visit's ground outputs are missing.
+  // Then plans ground-fill guidance for it (guidance.hpp, layers/guidance/).
   GroundLayer make_ground_layer(std::ostream& log, const GroundLayerConfig& config = {},
-                                const BoundaryConfig& boundary = {}) const;
+                                const BoundaryConfig& boundary = {},
+                                const GuidanceConfig& guidance = {}) const;
 
   // Builds the feature elements (features.hpp) from every visit's objects,
   // matched across visits, and writes them to layers/features/.
