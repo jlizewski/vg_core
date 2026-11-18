@@ -348,6 +348,9 @@ ground_layer:
   # Unseen holes up to this size (m^2) are filled; larger ones are unknown:
   # places to go and look.
   max_fill_area: 1
+  # The measured ground is smoothed: each cell becomes the median of the
+  # measured cells within this many cells of it (0: as measured).
+  smooth_cells: 2
   # Take the latest walk that measured a cell instead, as the site's current
   # maps do (for comparison).
   latest_wins: false

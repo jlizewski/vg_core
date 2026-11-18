@@ -65,6 +65,7 @@ vg::GroundLayerConfig latest_wins() {
   vg::GroundLayerConfig config;
   config.latest_wins = true;
   config.max_fill_area = 0.5;  // So the 1 m^2 hole at cell 4 isn't filled.
+  config.smooth_cells = 0;     // The walks' own heights.
   return config;
 }
 
@@ -175,7 +176,9 @@ TEST(GroundLayer, AlignsAWalkThatSitsHighAndTilted) {
     const bool plant = x > 1.0 && x < 1.8 && y > 1.0 && y < 3.0;
     return slope_ground(x, y) + static_cast<float>(0.15 + 0.02 * (x - 3.0)) + (plant ? 0.5f : 0.0f);
   });
-  const vg::GroundLayer layer = vg::estimate_ground({a, b}, {});
+  vg::GroundLayerConfig unsmoothed;
+  unsmoothed.smooth_cells = 0;  // Compared cell by cell below.
+  const vg::GroundLayer layer = vg::estimate_ground({a, b}, {}, unsmoothed);
 
   const vg::WalkAlignment& fit = layer.alignment[1];
   EXPECT_EQ(fit.cells, 900u);
@@ -368,6 +371,26 @@ TEST(GroundLayer, RecordedAfterComparesStamps) {
   EXPECT_FALSE(vg::recorded_after("20261109-120000", "2026-11-10T18:30:00Z"));
   EXPECT_FALSE(vg::recorded_after("", "2026-11-10T18:30:00Z"));
   EXPECT_FALSE(vg::recorded_after("20261111-090000", "yesterday"));
+}
+
+TEST(GroundLayer, SmoothsNoiseAndSpikesButKeepsASteps) {
+  // Flat ground at 0 with a 0.3 m step at x = 3 m, a lone 0.4 m spike, and
+  // +-2 cm noise.
+  const vg::WalkGround w = grid_walk("w", 30, [](double x, double y) {
+    const double noise = 0.02 * std::sin(37.0 * x) * std::cos(53.0 * y);
+    const double spike = std::abs(x - 1.1) < 0.1 && std::abs(y - 1.1) < 0.1 ? 0.4 : 0.0;
+    return static_cast<float>((x > 3.0 ? 0.3 : 0.0) + noise + spike);
+  });
+  const vg::GroundLayer layer = vg::estimate_ground({w}, {});
+  const auto h = [&](double x, double y) {
+    return layer.heights.heights[layer.index(static_cast<int>(x / 0.2), static_cast<int>(y / 0.2))];
+  };
+  EXPECT_NEAR(h(1.1, 1.1), 0.0, 0.02);  // The spike's gone.
+  EXPECT_NEAR(h(2.7, 3.1), 0.0, 0.02);  // Either side of the step, sharp.
+  EXPECT_NEAR(h(3.3, 3.1), 0.3, 0.02);
+  vg::GroundLayerConfig raw;
+  raw.smooth_cells = 0;
+  EXPECT_NEAR(vg::estimate_ground({w}, {}, raw).heights.heights[layer.index(5, 5)], 0.4, 0.03);
 }
 
 TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {

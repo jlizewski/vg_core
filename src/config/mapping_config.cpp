@@ -440,6 +440,9 @@ ParamSet bind(MappingConfig& c) {
   p.add("ground_layer.max_fill_area", c.ground_layer.max_fill_area,
         "Unseen holes up to this size (m^2) are filled; larger ones are unknown: places to go "
         "and look.");
+  p.add("ground_layer.smooth_cells", c.ground_layer.smooth_cells,
+        "The measured ground is smoothed: each cell becomes the median of the measured cells "
+        "within this many cells of it (0: as measured).");
   p.add("ground_layer.latest_wins", c.ground_layer.latest_wins,
         "Take the latest walk that measured a cell instead, as the site's current maps do "
         "(for comparison).");

@@ -636,6 +636,34 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
     }
   }
 
+  // The measured ground, smoothed (a median over its neighborhood).
+  if (config.smooth_cells > 0) {
+    const std::vector<float> measured_heights = map.heights;
+    std::vector<float> window;
+    for (int y = 0; y < map.height; ++y) {
+      for (int x = 0; x < map.width; ++x) {
+        const std::size_t i = layer.index(x, y);
+        if (layer.state[i] != GroundState::Measured) {
+          continue;
+        }
+        window.clear();
+        for (int dy = -config.smooth_cells; dy <= config.smooth_cells; ++dy) {
+          for (int dx = -config.smooth_cells; dx <= config.smooth_cells; ++dx) {
+            const int nx = x + dx;
+            const int ny = y + dy;
+            if (nx >= 0 && ny >= 0 && nx < map.width && ny < map.height &&
+                layer.state[layer.index(nx, ny)] == GroundState::Measured) {
+              window.push_back(measured_heights[layer.index(nx, ny)]);
+            }
+          }
+        }
+        const auto mid = window.begin() + static_cast<std::ptrdiff_t>(window.size() / 2);
+        std::nth_element(window.begin(), mid, window.end());
+        map.heights[i] = *mid;
+      }
+    }
+  }
+
   // The rest, by what stands on them in any walk: a structure, a tree or
   // anything tall covers the ground; anything lower (plants) leaves it
   // filled. Overhangs and objects labeled ground don't stand on it.

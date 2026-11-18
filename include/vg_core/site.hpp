@@ -15,6 +15,8 @@
 //                       before the latest one that saw it (growth, m)
 //     canopy.asc, canopy_top.asc, canopy.ply
 //                       the canopy from every visit's sky evidence together
+//     ground.asc, ground_state.asc
+//                       with a ground layer, its ground and state per cell
 //     model.glb         the site in 3D (Site::model), for viewing
 //   layers/             the site's layers (docs/design/guided-mapping.md):
 //     ground/           the ground, combined from every visit, with the
@@ -50,6 +52,7 @@ inline constexpr const char* kCurrent = "current";
 inline constexpr const char* kVisit = "visit.asc";
 inline constexpr const char* kChanges = "changes.asc";
 inline constexpr const char* kModel = "model.glb";
+inline constexpr const char* kGroundState = "ground_state.asc";
 }  // namespace site_file
 
 struct SiteVisit {
@@ -102,11 +105,19 @@ class Site {
   // matched across visits, and writes them to layers/features/.
   FeatureLayer make_feature_layer(std::ostream& log, const FeatureConfig& config = {}) const;
 
-  // The site in 3D, from current/ (made by make_maps): the surface colored
-  // by the class seen from above ("surface"), and the canopy's underside
-  // over the terrain, see-through ("canopy"). Parts whose maps are missing
-  // are empty.
+  // The site in 3D. With a ground layer (make_ground_layer): its clean
+  // ground ("ground": colored by the class seen from above where measured, a
+  // lighter tint where filled, dark where covered, yellow over unknown holes,
+  // their heights filled in for showing), what stands on it ("objects": the
+  // surface where it's over the ground, with sides down to it), the canopy's
+  // underside over the terrain, see-through ("canopy"), and the boundary as a
+  // low white kerb ("boundary"). Without one, from current/ (make_maps): the
+  // surface colored by class ("surface") and the canopy. Parts whose maps are
+  // missing are empty; the first is the ground (or surface).
   std::vector<MeshPart> model() const;
+
+  // Writes model() to current/model.glb.
+  void write_model(std::ostream& log) const;
 
   // The package directory of a visit, resolved against the site.
   std::filesystem::path package_dir(const SiteVisit& visit) const;

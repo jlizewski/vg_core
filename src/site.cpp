@@ -14,6 +14,7 @@
 #include <Eigen/Geometry>
 
 #include "vg_core/ground_layer.hpp"
+#include "vg_core/ground_segmentation.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/version.hpp"
 #include "vg_core/map_package.hpp"
@@ -480,10 +481,7 @@ void Site::make_maps(std::ostream& log, const CanopyConfig& canopy_config) const
     log << "site: canopy " << canopy.cells.size() << " cells of " << canopy.observed
         << " judged, from " << sky->frames() << " labeled frames" << std::endl;
   }
-  const std::vector<MeshPart> parts = model();
-  save_glb(parts, out / site_file::kModel);
-  log << "site: model " << parts[0].mesh.triangles() << " surface and " << parts[1].mesh.triangles()
-      << " canopy triangles" << std::endl;
+  write_model(log);
   log << "site: " << visits_.size() << " visits -> " << site_file::kCurrent << "/ ("
       << seconds_since(start) << " s)" << std::endl;
 }
@@ -541,7 +539,172 @@ std::vector<MeshPart> Site::model() const {
   parts[1].double_sided = true;
   const Rgba leaves = rgba(semantic_class_color(SemanticClass::Tree));
   parts[1].mesh = mesh_from_height_map(canopy, [&](int, int) { return leaves; });
-  return parts;
+
+  // With a ground layer: its clean ground, what stands on it, and the
+  // boundary, in place of the latest walk's surface.
+  const auto layer_dir = dir_ / ground_layer_file::kDir;
+  if (!std::filesystem::is_regular_file(layer_dir / ground_layer_file::kHeights) ||
+      !std::filesystem::is_regular_file(layer_dir / ground_layer_file::kState)) {
+    return parts;
+  }
+  HeightMap ground = load_height_map(layer_dir / ground_layer_file::kHeights);
+  const HeightMap state = load_height_map(layer_dir / ground_layer_file::kState);
+  if (state.width != ground.width || state.height != ground.height) {
+    return parts;
+  }
+  // Unknown holes get heights from around them, for showing only.
+  std::vector<char> hole(ground.heights.size(), 0);
+  for (std::size_t i = 0; i < hole.size(); ++i) {
+    hole[i] = state.heights[i] == static_cast<float>(GroundState::Unknown) &&
+              std::isnan(ground.heights[i]);
+  }
+  std::vector<std::uint8_t> filled(ground.heights.size(), 0);
+  fill_height_holes(ground, hole, filled);
+
+  const auto class_color = [&](const HeightMap& map, int x, int y) {
+    const float v = sample(map, semantic, x, y);
+    const auto c = v >= 0.0f && v < static_cast<float>(kSemanticClasses)
+                       ? static_cast<SemanticClass>(static_cast<int>(v))
+                       : SemanticClass::Ground;
+    return semantic_class_color(c);
+  };
+  MeshPart ground_part;
+  ground_part.name = "ground";
+  ground_part.mesh = mesh_from_height_map(ground, [&](int x, int y) {
+    switch (static_cast<GroundState>(static_cast<int>(state.at(x, y)))) {
+      case GroundState::Filled: {  // A lighter tint: inferred.
+        const auto c = class_color(ground, x, y);
+        return Rgba{static_cast<std::uint8_t>(c[0] + (255 - c[0]) * 3 / 10),
+                    static_cast<std::uint8_t>(c[1] + (255 - c[1]) * 3 / 10),
+                    static_cast<std::uint8_t>(c[2] + (255 - c[2]) * 3 / 10), 255};
+      }
+      case GroundState::Covered:
+        return Rgba{90, 80, 70, 255};
+      case GroundState::Unknown:
+        return Rgba{250, 220, 40, 255};  // A place to go and look.
+      default:
+        return rgba(class_color(ground, x, y));
+    }
+  });
+
+  // What stands on the ground: the surface where it's over the ground, and
+  // the cells around it at the ground's height (its sides).
+  constexpr float kStandsAbove = 0.1f;
+  HeightMap objects = surface;
+  std::vector<char> standing(objects.heights.size(), 0);
+  for (int y = 0; y < surface.height; ++y) {
+    for (int x = 0; x < surface.width; ++x) {
+      const float g = sample(surface, ground, x, y);
+      const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(surface.width) +
+                            static_cast<std::size_t>(x);
+      // Seen from above as ground, it's the ground's own texture (soil, mulch).
+      const float seen = sample(surface, semantic, x, y);
+      const bool ground_seen = seen == static_cast<float>(SemanticClass::Ground);
+      standing[i] = !std::isnan(g) && !ground_seen && surface.has_data(x, y) &&
+                    surface.at(x, y) > g + kStandsAbove;
+    }
+  }
+  for (int y = 0; y < surface.height; ++y) {
+    for (int x = 0; x < surface.width; ++x) {
+      const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(surface.width) +
+                            static_cast<std::size_t>(x);
+      if (standing[i]) {
+        continue;
+      }
+      bool beside = false;
+      for (int dy = -1; dy <= 1 && !beside; ++dy) {
+        for (int dx = -1; dx <= 1 && !beside; ++dx) {
+          const int nx = x + dx;
+          const int ny = y + dy;
+          beside = nx >= 0 && ny >= 0 && nx < surface.width && ny < surface.height &&
+                   standing[static_cast<std::size_t>(ny) * static_cast<std::size_t>(surface.width) +
+                            static_cast<std::size_t>(nx)];
+        }
+      }
+      objects.heights[i] = beside ? sample(surface, ground, x, y)
+                                  : std::numeric_limits<float>::quiet_NaN();
+    }
+  }
+  MeshPart objects_part;
+  objects_part.name = "objects";
+  objects_part.mesh = mesh_from_height_map(
+      objects, [&](int x, int y) { return rgba(class_color(surface, x, y)); });
+
+  // The boundary: a low white kerb on the ground.
+  MeshPart kerb;
+  kerb.name = "boundary";
+  kerb.double_sided = true;
+  const auto boundary_file = dir_ / boundary_layer_file::kDir / boundary_layer_file::kBoundary;
+  std::vector<Eigen::Vector2d> outline;
+  {
+    std::ifstream in(boundary_file);
+    std::string line;
+    std::getline(in, line);  // Header.
+    while (std::getline(in, line)) {
+      std::istringstream fields(line);
+      fields.imbue(std::locale::classic());
+      double x = 0.0;
+      double y = 0.0;
+      char comma = 0;
+      if (fields >> x >> comma >> y) {
+        outline.emplace_back(x, y);
+      }
+    }
+  }
+  // The ground's height near a point: its cell, else the nearest cell with
+  // one within a meter.
+  const auto ground_near = [&](const Eigen::Vector2d& p) {
+    const Eigen::Vector2d f = (p - ground.origin) / ground.cell_size;
+    const int cx = static_cast<int>(std::floor(f.x()));
+    const int cy = static_cast<int>(std::floor(f.y()));
+    const int reach = static_cast<int>(std::ceil(1.0 / ground.cell_size));
+    for (int r = 0; r <= reach; ++r) {
+      for (int dy = -r; dy <= r; ++dy) {
+        for (int dx = -r; dx <= r; ++dx) {
+          const int x = cx + dx;
+          const int y = cy + dy;
+          if ((std::abs(dx) == r || std::abs(dy) == r) && x >= 0 && y >= 0 && x < ground.width &&
+              y < ground.height && ground.has_data(x, y)) {
+            return ground.at(x, y);
+          }
+        }
+      }
+    }
+    return std::numeric_limits<float>::quiet_NaN();
+  };
+  constexpr float kKerb = 0.08f;
+  const Rgba white{245, 245, 245, 255};
+  for (std::size_t i = 0, j = outline.size() > 0 ? outline.size() - 1 : 0; i < outline.size();
+       j = i++) {
+    const float hj = ground_near(outline[j]);
+    const float hi = ground_near(outline[i]);
+    if (std::isnan(hi) || std::isnan(hj)) {
+      continue;
+    }
+    const auto base = static_cast<std::uint32_t>(kerb.mesh.positions.size());
+    const Eigen::Vector3f a(static_cast<float>(outline[j].x()), static_cast<float>(outline[j].y()), hj);
+    const Eigen::Vector3f b(static_cast<float>(outline[i].x()), static_cast<float>(outline[i].y()), hi);
+    const Eigen::Vector3f up(0.0f, 0.0f, kKerb);
+    kerb.mesh.positions.insert(kerb.mesh.positions.end(), {a, b, b + up, a + up});
+    const Eigen::Vector3f side = (b - a).cross(up).normalized();
+    kerb.mesh.normals.insert(kerb.mesh.normals.end(), 4, side);
+    kerb.mesh.colors.insert(kerb.mesh.colors.end(), 4, white);
+    kerb.mesh.indices.insert(kerb.mesh.indices.end(),
+                             {base, base + 1, base + 2, base, base + 2, base + 3});
+  }
+  return {ground_part, objects_part, parts[1], kerb};
+}
+
+void Site::write_model(std::ostream& log) const {
+  const auto out = dir_ / site_file::kCurrent;
+  std::filesystem::create_directories(out);
+  const std::vector<MeshPart> parts = model();
+  save_glb(parts, out / site_file::kModel);
+  log << "site: model";
+  for (const MeshPart& part : parts) {
+    log << ' ' << part.name << ' ' << part.mesh.triangles();
+  }
+  log << " triangles -> " << site_file::kCurrent << "/" << site_file::kModel << std::endl;
 }
 
 namespace {
@@ -797,11 +960,21 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
       }
     }
   }
+  // current/ shows the site's ground from the layer.
+  {
+    const auto current = dir_ / site_file::kCurrent;
+    std::filesystem::create_directories(current);
+    std::filesystem::copy_file(dir / ground_layer_file::kHeights, current / package_file::kGround,
+                               std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::copy_file(dir / ground_layer_file::kState, current / site_file::kGroundState,
+                               std::filesystem::copy_options::overwrite_existing);
+  }
   log << "ground layer: " << layer.heights.width << " x " << layer.heights.height
       << " cells from " << walks.size() << " walks and " << edits.size() << " edits: measured "
       << by_state[1] << ", filled " << by_state[2] << ", covered " << by_state[3]
       << ", unknown " << by_state[4] << " -> " << ground_layer_file::kDir << "/ ("
       << seconds_since(start) << " s)" << std::endl;
+  write_model(log);
   return layer;
 }
 

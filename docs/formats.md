@@ -110,7 +110,11 @@ A header row, then one row per visit, oldest first:
 ### `current/`
 
 The same grids as a package, in the site frame, plus `visit.asc` (visit
-number per cell, 1 = first) and `changes.asc` (surface change in m).
+number per cell, 1 = first) and `changes.asc` (surface change in m). With a
+ground layer, `ground.asc` is the layer's and `ground_state.asc` its state
+per cell (as `layers/ground/state.asc`). `model.glb` is the site in 3D
+(`Site::model()`): parts `ground`, `objects`, `canopy`, `boundary` with a
+ground layer, else `surface`, `canopy`.
 
 ### `layers/ground/`
 

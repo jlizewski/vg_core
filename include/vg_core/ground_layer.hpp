@@ -170,6 +170,12 @@ struct GroundLayerConfig {
   // cells no walk knew anything of, touching the map's edge, are Outside.
   double cover_min_height = 0.5;  // Meters.
   double max_fill_area = 1.0;     // Square meters.
+
+  // The measured ground is smoothed: each cell becomes the median of the
+  // measured cells within smooth_cells of it (a square 2 * smooth_cells + 1
+  // cells wide). A median takes out cell-to-cell noise and lone spikes but
+  // keeps a real step sharper than a mean would. 0: as measured.
+  int smooth_cells = 2;
 };
 
 // How a walk's ground was moved to meet the walks before it: its height at p

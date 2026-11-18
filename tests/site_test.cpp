@@ -352,4 +352,78 @@ TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
   fs::remove_all(root);
 }
 
+TEST(SiteModelTest, ShowsTheGroundLayerWhatStandsOnItAndTheBoundary) {
+  const fs::path root = fs::temp_directory_path() / "vg_site_model_layer_test";
+  fs::remove_all(root);
+  const fs::path current = root / vg::site_file::kCurrent;
+  const fs::path layer = root / vg::ground_layer_file::kDir;
+  fs::create_directories(current);
+  fs::create_directories(layer);
+  fs::create_directories(root / vg::boundary_layer_file::kDir);
+  // A 4 x 4 m site of 0.5 m cells: flat ground at 1 m, a 1 m box standing
+  // in cells (2-3, 2-3), an unknown hole at (6, 6).
+  const auto grid = [](float value) {
+    vg::HeightMap m;
+    m.cell_size = 0.5;
+    m.width = m.height = 8;
+    m.heights.assign(64, value);
+    return m;
+  };
+  vg::HeightMap ground = grid(1.0f);
+  vg::HeightMap state = grid(static_cast<float>(vg::GroundState::Measured));
+  vg::HeightMap surface = grid(1.0f);
+  vg::HeightMap semantic = grid(static_cast<float>(vg::SemanticClass::Ground));
+  for (int y = 2; y <= 3; ++y) {
+    for (int x = 2; x <= 3; ++x) {
+      surface.heights[static_cast<std::size_t>(y * 8 + x)] = 2.0f;
+      semantic.heights[static_cast<std::size_t>(y * 8 + x)] =
+          static_cast<float>(vg::SemanticClass::Structure);
+      state.heights[static_cast<std::size_t>(y * 8 + x)] = static_cast<float>(vg::GroundState::Covered);
+    }
+  }
+  ground.heights[6 * 8 + 6] = std::numeric_limits<float>::quiet_NaN();
+  state.heights[6 * 8 + 6] = static_cast<float>(vg::GroundState::Unknown);
+  vg::save_height_map(ground, layer / vg::ground_layer_file::kHeights);
+  vg::save_height_map(state, layer / vg::ground_layer_file::kState);
+  vg::save_height_map(surface, current / vg::package_file::kSurface);
+  vg::save_height_map(semantic, current / vg::package_file::kSemantic);
+  {
+    std::ofstream b(root / vg::boundary_layer_file::kDir / vg::boundary_layer_file::kBoundary);
+    b << "x,y,edge,push_m\n0.1,0.1,structure,1\n3.9,0.1,structure,1\n3.9,3.9,assumed,1\n0.1,3.9,"
+         "edited,0\n";
+  }
+
+  const std::vector<vg::MeshPart> parts = vg::Site(root).model();
+  ASSERT_EQ(parts.size(), 4u);
+  EXPECT_EQ(parts[0].name, "ground");
+  EXPECT_EQ(parts[1].name, "objects");
+  EXPECT_EQ(parts[2].name, "canopy");
+  EXPECT_EQ(parts[3].name, "boundary");
+
+  // The ground: every cell, flat at 1 m (the hole too, shown yellow).
+  const vg::Mesh& g = parts[0].mesh;
+  ASSERT_EQ(g.positions.size(), 64u);
+  bool yellow = false;
+  for (std::size_t i = 0; i < g.positions.size(); ++i) {
+    EXPECT_NEAR(g.positions[i].z(), 1.0f, 1e-4);
+    yellow = yellow || (g.colors[i][0] == 250 && g.colors[i][1] == 220);
+  }
+  EXPECT_TRUE(yellow);
+
+  // What stands on it: the box's top at 2 m, with sides down to 1 m.
+  const vg::Mesh& o = parts[1].mesh;
+  EXPECT_FALSE(o.empty());
+  std::size_t top = 0;
+  for (const Eigen::Vector3f& p : o.positions) {
+    top += p.z() > 1.5f ? 1 : 0;
+    EXPECT_GT(p.x(), 0.5f);  // Nothing far from the box.
+    EXPECT_LT(p.x(), 2.5f);
+  }
+  EXPECT_EQ(top, 4u);
+
+  // The boundary: one kerb face per edge.
+  EXPECT_EQ(parts[3].mesh.triangles(), 8u);
+  fs::remove_all(root);
+}
+
 }  // namespace

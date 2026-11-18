@@ -138,6 +138,8 @@ bool add_to_site(const std::filesystem::path& site_dir,
     all_added = all_added && (result.accepted || force);
   }
   site.make_maps(log, config.sky.config);
+  // The layers, so current/ and the model show the site's ground.
+  make_site_ground(site_dir, settings, log);
   return all_added;
 }
 
@@ -224,6 +226,7 @@ void make_site_maps(const std::filesystem::path& site_dir,
   params.apply_args(settings);
   config.validate();
   Site(site_dir).make_maps(log, config.sky.config);
+  make_site_ground(site_dir, settings, log);
 }
 
 }  // namespace vg::config

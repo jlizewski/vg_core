@@ -170,6 +170,17 @@ the ground as an entity of its own, from every visit's ground stage outputs
   [config/mapping.yaml](../../config/mapping.yaml); `latest_wins` and
   `align: false` give the old behavior for comparison.
 
+- **Smoothing**: the measured ground is the median of its neighborhood
+  (`smooth_cells`, 5 x 5 cells): cell-to-cell noise and lone spikes go, real
+  steps stay sharp.
+- **The site's model**: with a ground layer, `current/model.glb` shows its
+  clean ground (by class where measured, a lighter tint where filled, dark
+  where covered, **yellow over unknown holes**: places to go and look), what
+  stands on it (the surface where it's over the ground and not seen as
+  ground, with sides down to it), the canopy, and the boundary as a low white
+  kerb. `current/ground.asc` and `current/ground_state.asc` are the layer's,
+  and adding walks or remaking the maps remakes the layers too.
+
 The same evidence and edits always give byte-identical files. Packages made
 before the ground stage wrote its per-cell outputs get them first.
 
