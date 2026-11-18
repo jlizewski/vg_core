@@ -327,6 +327,13 @@ ground_layer:
   # A tilt steeper than this (degrees) is refused: the walk is only moved up or
   # down.
   align_max_tilt_deg: 5
+  # Where no walk saw the ground: under something standing on it at least this
+  # tall (m), or a structure or tree, it's covered; under anything lower
+  # (plants), filled.
+  cover_min_height: 0.5
+  # Unseen holes up to this size (m^2) are filled; larger ones are unknown:
+  # places to go and look.
+  max_fill_area: 1
   # Take the latest walk that measured a cell instead, as the site's current
   # maps do (for comparison).
   latest_wins: false

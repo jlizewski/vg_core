@@ -421,6 +421,12 @@ ParamSet bind(MappingConfig& c) {
         "Shared cells a walk needs for a tilt; with fewer, it's only moved up or down.");
   p.add("ground_layer.align_max_tilt_deg", c.ground_layer.align_max_tilt_deg,
         "A tilt steeper than this (degrees) is refused: the walk is only moved up or down.");
+  p.add("ground_layer.cover_min_height", c.ground_layer.cover_min_height,
+        "Where no walk saw the ground: under something standing on it at least this tall (m), "
+        "or a structure or tree, it's covered; under anything lower (plants), filled.");
+  p.add("ground_layer.max_fill_area", c.ground_layer.max_fill_area,
+        "Unseen holes up to this size (m^2) are filled; larger ones are unknown: places to go "
+        "and look.");
   p.add("ground_layer.latest_wins", c.ground_layer.latest_wins,
         "Take the latest walk that measured a cell instead, as the site's current maps do "
         "(for comparison).");

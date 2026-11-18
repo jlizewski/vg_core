@@ -64,6 +64,7 @@ GroundEdit edit(GroundEdit::Kind kind, double x0, double x1, const std::string& 
 vg::GroundLayerConfig latest_wins() {
   vg::GroundLayerConfig config;
   config.latest_wins = true;
+  config.max_fill_area = 0.5;  // So the 1 m^2 hole at cell 4 isn't filled.
   return config;
 }
 
@@ -86,19 +87,22 @@ TEST(GroundLayer, CombinesWalksTheLatestMeasuredWins) {
   EXPECT_FLOAT_EQ(layer.spread[1], 1.5f);  // a, 1.5 m below.
   EXPECT_FLOAT_EQ(layer.spread[0], 0.0f);  // One walk.
 
-  EXPECT_EQ(layer.state[2], GroundState::Covered);  // Under an object beats a small hole.
-  EXPECT_FLOAT_EQ(h[2], 1.2f);
+  // Under an object (not known what: covered) beats a small hole; the ground
+  // runs on from the measured ground beside it, not the walk's own patch.
+  EXPECT_EQ(layer.state[2], GroundState::Covered);
+  EXPECT_FLOAT_EQ(h[2], 2.5f);
   EXPECT_EQ(layer.provenance[2], Provenance::Inferred);
   EXPECT_EQ(layer.observations[2], 0);
+  EXPECT_TRUE(std::isnan(layer.spread[2]));
 
   EXPECT_EQ(layer.state[3], GroundState::Measured);  // b saw what a missed.
   EXPECT_FLOAT_EQ(h[3], 2.5f);
 
-  EXPECT_EQ(layer.state[4], GroundState::Unknown);  // Nobody saw it.
+  EXPECT_EQ(layer.state[4], GroundState::Unknown);  // A hole, too large to fill.
   EXPECT_TRUE(std::isnan(h[4]));
   EXPECT_EQ(layer.provenance[4], Provenance::None);
 
-  EXPECT_EQ(layer.state[5], GroundState::Outside);
+  EXPECT_EQ(layer.state[5], GroundState::Outside);  // Nobody knew it, at the edge.
 }
 
 // Walks over the same two cells (heights per walk), with weights.
@@ -247,6 +251,87 @@ TEST(GroundLayer, AlignsToTheWalkThatSetsTheFrameNotTheOldest) {
   EXPECT_NEAR(layer.alignment[0].offset, 0.12, 0.005);
   EXPECT_DOUBLE_EQ(layer.alignment[1].offset, 0.0);
   EXPECT_NEAR(layer.heights.heights[layer.index(15, 15)], slope_ground(3.1, 3.1), 0.005);
+}
+
+// The 6 x 6 m sloping walk, with what it saw on the ground in places: cells
+// of each rectangle (in 0.2 m cells, inclusive) get the state and object.
+struct Patch {
+  int x0, y0, x1, y1;
+  GroundCell state;
+  int object;  // -1: none.
+};
+vg::WalkGround yard(const std::vector<vg::WalkObject>& objects, const std::vector<Patch>& patches) {
+  vg::WalkGround w = grid_walk("yard", 30, slope_ground);
+  w.object.assign(w.state.size(), -1);
+  w.objects = objects;
+  for (const Patch& p : patches) {
+    for (int y = p.y0; y <= p.y1; ++y) {
+      for (int x = p.x0; x <= p.x1; ++x) {
+        const std::size_t i = static_cast<std::size_t>(y) * 30 + static_cast<std::size_t>(x);
+        w.state[i] = static_cast<std::uint8_t>(p.state);
+        w.object[i] = p.object;
+        w.weight[i] = 0.0f;
+        w.heights.heights[i] = p.state == GroundCell::LargeHole ? kNaN : 9.0f;  // Patches: ignored.
+      }
+    }
+  }
+  return w;
+}
+
+vg::WalkObject object(vg::SemanticClass label, bool grounded, double top) {
+  vg::WalkObject o;
+  o.label = label;
+  o.grounded = grounded;
+  o.top_above_ground = top;
+  return o;
+}
+
+TEST(GroundLayer, ClassifiesWhatStandsOnTheGroundAndTheHoles) {
+  using vg::SemanticClass;
+  using C = GroundCell;
+  const std::vector<vg::WalkObject> objects = {
+      object(SemanticClass::Structure, true, 2.0),  // 0: a shed
+      object(SemanticClass::Plant, true, 0.3),      // 1: low plants
+      object(SemanticClass::Unknown, true, 0.8),    // 2: something tall
+      object(SemanticClass::Tree, false, 3.0),      // 3: a canopy (overhang)
+      object(SemanticClass::Ground, true, 0.4),     // 4: a stretch of ground not joined
+  };
+  const vg::WalkGround w =
+      yard(objects, {
+                        {2, 2, 6, 6, C::UnderObject, 0},      // shed, 1 x 1 m
+                        {10, 2, 14, 6, C::UnderObject, 1},    // plants
+                        {18, 2, 20, 4, C::UnderObject, 2},    // something tall
+                        {2, 10, 7, 15, C::UnderObject, 3},    // canopy over unseen ground, 1.44 m^2
+                        {10, 10, 12, 12, C::UnderObject, 4},  // ground piece, 0.36 m^2
+                        {15, 15, 22, 22, C::LargeHole, -1},   // unseen, 2.56 m^2
+                        {25, 10, 26, 11, C::SmallHole, -1},   // unseen, 0.16 m^2
+                        {0, 25, 0, 29, C::None, -1},          // never seen, at the edge
+                        {24, 24, 26, 26, C::None, -1},        // never seen, enclosed, 0.36 m^2
+                    });
+  const vg::GroundLayer layer = vg::estimate_ground({w}, {});
+  const auto state = [&](int x, int y) { return layer.state[layer.index(x, y)]; };
+
+  EXPECT_EQ(state(4, 4), GroundState::Covered);
+  EXPECT_EQ(state(12, 4), GroundState::Filled);
+  EXPECT_EQ(state(19, 3), GroundState::Covered);
+  EXPECT_EQ(state(4, 12), GroundState::Unknown);  // The canopy doesn't stand on it.
+  EXPECT_EQ(state(11, 11), GroundState::Filled);  // Small, and ground anyway.
+  EXPECT_EQ(state(18, 18), GroundState::Unknown);
+  EXPECT_EQ(state(25, 10), GroundState::Filled);
+  EXPECT_EQ(state(0, 27), GroundState::Outside);
+  EXPECT_EQ(state(25, 25), GroundState::Filled);  // Enclosed by what the walk saw.
+  EXPECT_EQ(state(1, 1), GroundState::Measured);
+
+  // Under the shed the slope runs on, from the measured ground around it.
+  const float shed = layer.heights.heights[layer.index(4, 4)];
+  EXPECT_NEAR(shed, slope_ground(0.9, 0.9), 0.01);
+  EXPECT_EQ(layer.provenance[layer.index(4, 4)], Provenance::Inferred);
+  EXPECT_TRUE(std::isnan(layer.heights.heights[layer.index(18, 18)]));  // Unknown: no height.
+
+  // Lower the bar for covering: the plants (0.3 m) cover too.
+  vg::GroundLayerConfig low;
+  low.cover_min_height = 0.25;
+  EXPECT_EQ(vg::estimate_ground({w}, {}, low).state[layer.index(12, 4)], GroundState::Covered);
 }
 
 TEST(GroundLayer, EditsWinAndTheGroundRunsOnBeneath) {

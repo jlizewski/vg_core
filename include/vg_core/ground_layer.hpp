@@ -32,6 +32,7 @@
 
 #include "vg_core/height_map.hpp"
 #include "vg_core/registration.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace vg {
 
@@ -52,9 +53,11 @@ inline constexpr const char* kInfo = "layer.json";
 enum class GroundState : std::uint8_t {
   Outside = 0,   // No walk saw it, and nothing encloses it.
   Measured = 1,  // Seen as ground.
-  Filled = 2,    // A small unseen hole, filled smoothly from around it.
-  Covered = 3,   // Under something standing on the ground; the surface runs on beneath.
+  Filled = 2,    // Unseen but surely ground: a small hole, or under low plants.
+  Covered = 3,   // Under a structure or something tall standing on it.
   Unknown = 4,   // An unseen hole too large to fill: a place to go and look.
+  // Filled and Covered ground runs on smoothly from the measured ground
+  // around it.
 };
 
 // Where a cell's value came from.
@@ -64,6 +67,14 @@ enum class Provenance : std::uint8_t {
   Inferred = 2,   // Filled or carried over from around it.
   Edited = 3,     // Set by the user.
   Confirmed = 4,  // Shown to the user and accepted.
+};
+
+// Something a walk saw on or over the ground (a row of objects.csv).
+struct WalkObject {
+  SemanticClass label = SemanticClass::Unknown;
+  bool grounded = false;          // Stands on the ground (false: an overhang).
+  double top_above_ground = 0.0;  // Meters; NaN if unknown.
+  double footprint_area = 0.0;    // Square meters.
 };
 
 // One walk's ground, in its own map frame (the ground stage's outputs), and
@@ -78,6 +89,11 @@ struct WalkGround {
   HeightMap heights;                // ground.asc: patched where not measured.
   std::vector<std::uint8_t> state;  // ground_state.asc: GroundCell, 0 where none.
   std::vector<float> weight;        // ground_weight.asc: 0 where not measured.
+  // ground_object.asc: the index in objects of the largest object over the
+  // cell, -1 for none. Empty if not known (every patched cell under an
+  // object then counts as covered).
+  std::vector<int> object;
+  std::vector<WalkObject> objects;  // objects.csv, in id order.
 };
 
 // Loads a package's ground stage outputs. Throws std::runtime_error if they're
@@ -129,6 +145,15 @@ struct GroundLayerConfig {
   bool align = true;
   int align_min_cells = 200;
   double align_max_tilt_deg = 5.0;
+
+  // Where no walk measured the ground: under something standing on it that's
+  // a structure, a tree, or at least cover_min_height tall, it's Covered;
+  // under anything lower (plants), Filled. Overhangs and objects labeled
+  // ground (a stretch of ground not joined to the rest) don't count. Other
+  // unseen cells are a hole: Filled up to max_fill_area, else Unknown; but
+  // cells no walk knew anything of, touching the map's edge, are Outside.
+  double cover_min_height = 0.5;  // Meters.
+  double max_fill_area = 1.0;     // Square meters.
 };
 
 // How a walk's ground was moved to meet the walks before it: its height at p

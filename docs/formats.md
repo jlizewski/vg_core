@@ -128,7 +128,7 @@ cell size.
 | `spread.asc` | ASCII grid, m | How far the farthest walk is from the height: where walks disagree |
 | `evidence.csv` | CSV | The walks used: `id, package, recorded, yaw_deg, x, y, z`, and how each walk's ground was aligned: `align_cells` (shared with the walks before it), `align_offset_m` at `align_center_x/y`, `align_slope_x/y` (rise per m), `align_before_m` and `align_after_m` (median distance to the walks before it) |
 | `edits.csv` | CSV | The user's edits: `id, time, kind, polygon, note`; kind `ground` or `not_ground`, polygon `x y;x y;...` in the site frame (m), the note is the rest of the line. Read, never rewritten |
-| `layer.json` | JSON | How it was made: combine rule and alignment settings, cell size, walks, edits applied, cells per state |
+| `layer.json` | JSON | How it was made: combine rule, alignment and classification settings, cell size, walks, edits applied, cells per state |
 
 ## Planned
 

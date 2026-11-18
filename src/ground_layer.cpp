@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <limits>
 #include <locale>
@@ -13,6 +14,7 @@
 #include "vg_core/ground_segmentation.hpp"
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/map_package.hpp"
+#include "vg_core/semantics.hpp"
 
 namespace vg {
 namespace {
@@ -225,11 +227,47 @@ WalkAlignment fit_alignment(const std::vector<Eigen::Vector3d>& differences,
   return a;
 }
 
+// A number from objects.csv; NaN for "nan" or anything unreadable.
+double table_number(const std::string& text) {
+  char* end = nullptr;
+  const double v = std::strtod(text.c_str(), &end);
+  return end != text.c_str() ? v : std::numeric_limits<double>::quiet_NaN();
+}
+
+// objects.csv, in id order (ids are 1, 2, ...).
+std::vector<WalkObject> load_walk_objects(const std::filesystem::path& path) {
+  std::vector<WalkObject> objects;
+  std::ifstream in(path);
+  std::string line;
+  std::getline(in, line);  // Header.
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    std::vector<std::string> f;
+    std::istringstream fields(line);
+    for (std::string field; std::getline(fields, field, ',');) {
+      f.push_back(field);
+    }
+    if (f.size() < 14) {
+      continue;
+    }
+    WalkObject o;
+    o.grounded = f[2] == "1";
+    o.label = parse_semantic_class(f[3]).value_or(SemanticClass::Unknown);
+    o.top_above_ground = table_number(f[6]);
+    o.footprint_area = table_number(f[13]);
+    objects.push_back(o);
+  }
+  return objects;
+}
+
 }  // namespace
 
 WalkGround load_walk_ground(const std::filesystem::path& package) {
   for (const char* file :
-       {package_file::kGround, package_file::kGroundState, package_file::kGroundWeight}) {
+       {package_file::kGround, package_file::kGroundState, package_file::kGroundWeight,
+        package_file::kGroundObject, package_file::kObjectsTable}) {
     if (!std::filesystem::is_regular_file(package / file)) {
       throw std::runtime_error("ground layer: " + (package / file).string() +
                                " is missing (re-run the ground stage: vg map " + package.string() +
@@ -241,8 +279,10 @@ WalkGround load_walk_ground(const std::filesystem::path& package) {
   walk.heights = load_height_map(package / package_file::kGround);
   const HeightMap state = load_height_map(package / package_file::kGroundState);
   const HeightMap weight = load_height_map(package / package_file::kGroundWeight);
+  const HeightMap object = load_height_map(package / package_file::kGroundObject);
   if (state.width != walk.heights.width || state.height != walk.heights.height ||
-      weight.width != walk.heights.width || weight.height != walk.heights.height) {
+      weight.width != walk.heights.width || weight.height != walk.heights.height ||
+      object.width != walk.heights.width || object.height != walk.heights.height) {
     throw std::runtime_error("ground layer: " + package.string() +
                              ": ground maps of different sizes (re-run its ground stage)");
   }
@@ -251,7 +291,10 @@ WalkGround load_walk_ground(const std::filesystem::path& package) {
   for (std::size_t i = 0; i < state.heights.size(); ++i) {
     walk.state.push_back(to_state(state.heights[i]));
     walk.weight.push_back(std::isnan(weight.heights[i]) ? 0.0f : weight.heights[i]);
+    const float id = object.heights[i];  // 1-based; no data for none.
+    walk.object.push_back(std::isnan(id) || id < 1.0f ? -1 : static_cast<int>(id) - 1);
   }
+  walk.objects = load_walk_objects(package / package_file::kObjectsTable);
   return walk;
 }
 
@@ -392,6 +435,7 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
     std::vector<std::uint8_t> state;
     std::vector<float> height;
     std::vector<float> weight;
+    std::vector<int> object;  // Index into the walk's objects; -1 for none.
   };
   std::vector<OnGrid> grid(walks.size());
   for (std::size_t k = 0; k < walks.size(); ++k) {
@@ -400,6 +444,7 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
     g.state.assign(cells, 0);
     g.height.assign(cells, kNaN);
     g.weight.assign(cells, 0.0f);
+    g.object.assign(cells, -1);
     const HeightMap& h = w.heights;
     if (h.width == 0) {
       continue;
@@ -424,6 +469,7 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
         g.state[i] = w.state[at];
         g.height[i] = h.heights[at] + z;
         g.weight[i] = w.weight[at];
+        g.object[i] = w.object.empty() ? -2 : w.object[at];  // -2: not known.
       }
     }
   }
@@ -474,40 +520,116 @@ GroundLayer estimate_ground(const std::vector<WalkGround>& walks,
     }
   }
 
-  std::array<std::vector<Sample>, 5> samples;  // By GroundCell.
+  // Cells some walk measured: combined.
+  std::vector<Sample> measured;
   for (std::size_t i = 0; i < cells; ++i) {
-    // Each walk's height for the cell, by what that walk knew of it.
-    for (auto& list : samples) {
-      list.clear();
-    }
+    measured.clear();
     for (std::size_t k = 0; k < walks.size(); ++k) {
-      const std::uint8_t s = grid[k].state[i];
-      if (s != 0) {
-        samples[s].push_back({grid[k].height[i], grid[k].weight[i], static_cast<int>(k)});
+      if (grid[k].state[i] == kMeasured) {
+        measured.push_back({grid[k].height[i], grid[k].weight[i], static_cast<int>(k)});
       }
     }
-    layer.observations[i] = static_cast<std::uint16_t>(samples[kMeasured].size());
-    // Measured by any walk beats patched under an object, which beats a
-    // small patched hole: each from the walks that knew it that way.
-    const auto take = [&](GroundCell from, GroundState to) {
-      std::vector<Sample>& list = samples[static_cast<std::size_t>(from)];
-      if (list.empty()) {
-        return false;
-      }
-      const Combined c = combine(list, config);
-      layer.state[i] = to;
-      layer.provenance[i] =
-          to == GroundState::Measured ? Provenance::Measured : Provenance::Inferred;
+    layer.observations[i] = static_cast<std::uint16_t>(measured.size());
+    if (!measured.empty()) {
+      const Combined c = combine(measured, config);
+      layer.state[i] = GroundState::Measured;
+      layer.provenance[i] = Provenance::Measured;
       map.heights[i] = c.height;
       layer.source[i] = c.source;
       layer.spread[i] = c.spread;
-      return true;
-    };
-    if (!take(GroundCell::Measured, GroundState::Measured) &&
-        !take(GroundCell::UnderObject, GroundState::Covered) &&
-        !take(GroundCell::SmallHole, GroundState::Filled) &&
-        !samples[static_cast<std::size_t>(GroundCell::LargeHole)].empty()) {
-      layer.state[i] = GroundState::Unknown;
+    }
+  }
+
+  // The rest, by what stands on them in any walk: a structure, a tree or
+  // anything tall covers the ground; anything lower (plants) leaves it
+  // filled. Overhangs and objects labeled ground don't stand on it.
+  constexpr std::uint8_t kNothing = 0;
+  constexpr std::uint8_t kLow = 1;
+  constexpr std::uint8_t kStanding = 2;
+  std::vector<std::uint8_t> over(cells, kNothing);
+  std::vector<char> known(cells, 0);  // Some walk knew something of the cell.
+  for (std::size_t i = 0; i < cells; ++i) {
+    if (layer.state[i] == GroundState::Measured) {
+      continue;
+    }
+    for (std::size_t k = 0; k < walks.size(); ++k) {
+      const std::uint8_t s = grid[k].state[i];
+      if (s == 0) {
+        continue;
+      }
+      known[i] = 1;
+      const int o = grid[k].object[i];
+      std::uint8_t what = kNothing;
+      if (o == -2 || (o >= 0 && static_cast<std::size_t>(o) >= walks[k].objects.size())) {
+        // Not known what's there: under an object counts as covered.
+        what = s == static_cast<std::uint8_t>(GroundCell::UnderObject) ? kStanding : kNothing;
+      } else if (o >= 0) {
+        const WalkObject& object = walks[k].objects[static_cast<std::size_t>(o)];
+        if (object.grounded && object.label != SemanticClass::Ground) {
+          const bool tall = object.label == SemanticClass::Structure ||
+                            object.label == SemanticClass::Tree ||
+                            object.top_above_ground >= config.cover_min_height;
+          what = tall ? kStanding : kLow;
+        }
+      }
+      over[i] = std::max(over[i], what);
+    }
+    if (over[i] != kNothing) {
+      layer.state[i] = over[i] == kStanding ? GroundState::Covered : GroundState::Filled;
+      layer.provenance[i] = Provenance::Inferred;
+    }
+  }
+
+  // Unseen cells left: regions no walk knew anything of that reach the map's
+  // edge are outside; everything else is a hole, filled if small.
+  const auto open = [&](std::size_t i) {
+    return layer.state[i] == GroundState::Outside;  // Not classified yet.
+  };
+  std::vector<char> visited(cells, 0);
+  std::vector<std::size_t> region;
+  const auto grow = [&](std::size_t start, auto&& joins) {
+    region.assign(1, start);
+    visited[start] = 1;
+    bool edge = false;
+    for (std::size_t m = 0; m < region.size(); ++m) {
+      const int x = static_cast<int>(region[m] % static_cast<std::size_t>(map.width));
+      const int y = static_cast<int>(region[m] / static_cast<std::size_t>(map.width));
+      edge = edge || x == 0 || y == 0 || x == map.width - 1 || y == map.height - 1;
+      const std::array<std::array<int, 2>, 4> steps = {{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}};
+      for (const auto& d : steps) {
+        const int nx = x + d[0];
+        const int ny = y + d[1];
+        if (nx < 0 || ny < 0 || nx >= map.width || ny >= map.height) {
+          continue;
+        }
+        const std::size_t n = layer.index(nx, ny);
+        if (!visited[n] && joins(n)) {
+          visited[n] = 1;
+          region.push_back(n);
+        }
+      }
+    }
+    return edge;
+  };
+  std::vector<char> outside(cells, 0);
+  for (std::size_t i = 0; i < cells; ++i) {
+    if (open(i) && !known[i] && !visited[i]) {
+      const bool edge = grow(i, [&](std::size_t n) { return open(n) && !known[n]; });
+      for (const std::size_t r : region) {
+        outside[r] = edge ? 1 : 0;
+      }
+    }
+  }
+  std::fill(visited.begin(), visited.end(), 0);
+  const double cell_area = cell * cell;
+  for (std::size_t i = 0; i < cells; ++i) {
+    if (open(i) && !outside[i] && !visited[i]) {
+      grow(i, [&](std::size_t n) { return open(n) && !outside[n]; });
+      const bool small = static_cast<double>(region.size()) * cell_area <= config.max_fill_area;
+      for (const std::size_t r : region) {
+        layer.state[r] = small ? GroundState::Filled : GroundState::Unknown;
+        layer.provenance[r] = small ? Provenance::Inferred : Provenance::None;
+      }
     }
   }
 

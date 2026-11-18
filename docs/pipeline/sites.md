@@ -116,10 +116,15 @@ the ground as an entity of its own, from every visit's ground stage outputs
 (`ground_state.asc`, `ground_weight.asc`), in `layers/ground/`
 ([formats.md](../formats.md#layersground)).
 
-- **State per cell**: *measured* if any walk saw ground there; otherwise
-  *covered* (under an object in some walk), *filled* (a small unseen hole),
-  *unknown* (an unseen hole too large to fill: a place to go and look), or
-  *outside*.
+- **State per cell**: *measured* if any walk saw ground there. Otherwise, by
+  what any walk saw standing on it (`objects.csv`): *covered* under a
+  structure, a tree, or anything at least `cover_min_height` (0.5 m) tall;
+  *filled* under anything lower (plants). Overhangs (a canopy, an eave) and
+  objects labeled ground (a stretch of ground not joined to the rest) don't
+  stand on it. Cells left are *outside* if no walk knew anything of them and
+  they reach the map's edge; otherwise a hole: *filled* up to
+  `max_fill_area` (1 m²), else *unknown*, a place to go and look. Filled and
+  covered ground runs on smoothly from the measured ground around it.
 - **Where each value came from**: *measured*, *inferred* (patched), *edited*,
   and, later, *confirmed*; how many walks measured each cell, and which one
   the height came from.

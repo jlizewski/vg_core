@@ -586,6 +586,8 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
         << ",\n  \"align\": " << (config.align ? "true" : "false")
         << ",\n  \"align_min_cells\": " << config.align_min_cells
         << ",\n  \"align_max_tilt_deg\": " << config.align_max_tilt_deg
+        << ",\n  \"cover_min_height_m\": " << config.cover_min_height
+        << ",\n  \"max_fill_area_m2\": " << config.max_fill_area
         << ",\n  \"cell_size_m\": " << layer.heights.cell_size
         << ",\n  \"walks\": " << walks.size() << ",\n  \"edits\": [";
     for (std::size_t e = 0; e < edits.size(); ++e) {
