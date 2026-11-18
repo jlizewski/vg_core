@@ -13,7 +13,7 @@ namespace {
 constexpr std::array<char, 8> kMagic = {'V', 'G', 'M', 'A', 'P', '\0', '\0', '\0'};
 // Version 2 added the quality weighting and minimum weight.
 // Version 3 added the semantic label votes.
-constexpr std::uint32_t kVersion = 3;
+constexpr std::uint32_t kVersion = 4;
 
 // Values are copied as raw bytes: little-endian on all supported hosts.
 template <typename T>
@@ -105,6 +105,9 @@ void write_map(const TsdfVolume& volume, const MapMetadata& metadata, std::ostre
                 static_cast<std::streamsize>(votes.size()));
     }
   }
+  // Since version 4: the recording's session type and tracking frame.
+  put_string(out, metadata.session_type);
+  put_string(out, metadata.tracking_frame);
 }
 
 SavedMap read_map(std::istream& in) {
@@ -178,6 +181,10 @@ SavedMap read_map(std::istream& in) {
         }
       }
     }
+  }
+  if (version >= 4) {
+    map.metadata.session_type = get_string(in);
+    map.metadata.tracking_frame = get_string(in);
   }
   // Nothing has changed since the map was saved.
   map.volume.take_changed_blocks();

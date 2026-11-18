@@ -39,6 +39,8 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   std::vector<GpsFix> fixes;
   std::vector<PoseStamped> poses;
   std::optional<Timestamp> first_reading;
+  std::string session_type;
+  std::string tracking_frame;
   PoseJumpFilter jumps(options.pose_jumps);
   std::vector<std::pair<double, Eigen::Vector3d>> camera_path;
   std::size_t outside_window = 0;
@@ -67,6 +69,10 @@ BuildSummary build_map_package(const std::filesystem::path& session,
             ++outside_window;
             return true;
           }
+        }
+        if (const auto* info = std::get_if<SessionInfo>(&m)) {
+          session_type = info->session_type;
+          tracking_frame = info->tracking_frame;
         }
         if (const auto* pose = std::get_if<PoseStamped>(&m)) {
           const PoseStamped corrected = options.remove_pose_jumps ? jumps.correct(*pose) : *pose;
@@ -156,6 +162,8 @@ BuildSummary build_map_package(const std::filesystem::path& session,
   metadata.cell_size = options.cell_size;
   metadata.geo = estimate_geo_reference(fixes, poses);
   metadata.frames_integrated = stats.integrated;
+  metadata.session_type = session_type;
+  metadata.tracking_frame = tracking_frame;
   if (!metadata.geo) {
     log << "warning: no GPS fixes in the session, so the map isn't placed on the Earth\n";
   }

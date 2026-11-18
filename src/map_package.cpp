@@ -174,6 +174,8 @@ void write_manifest(const std::filesystem::path& dir, const MapMetadata& metadat
   out << "  \"format_version\": 1,\n";
   out << "  \"vg_core_version\": " << json_string(std::string(version_string())) << ",\n";
   out << "  \"session\": " << json_string(metadata.session) << ",\n";
+  out << "  \"session_type\": " << json_string(metadata.session_type) << ",\n";
+  out << "  \"tracking_frame\": " << json_string(metadata.tracking_frame) << ",\n";
   out << "  \"voxel_size_m\": " << json_number(voxel_size) << ",\n";
   out << "  \"cell_size_m\": " << json_number(metadata.cell_size) << ",\n";
   out << "  \"frames_integrated\": " << metadata.frames_integrated << ",\n";

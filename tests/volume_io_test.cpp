@@ -31,6 +31,8 @@ TEST(VolumeIo, RoundTripsVolumeAndMetadata) {
   metadata.session = "garden.mcap";
   metadata.cell_size = 0.1524;
   metadata.frames_integrated = 42;
+  metadata.session_type = "boundary_walk";
+  metadata.tracking_frame = "run-7";
   vg::GeoReference geo;
   geo.latitude = 42.36;
   geo.longitude = -71.06;
@@ -46,6 +48,8 @@ TEST(VolumeIo, RoundTripsVolumeAndMetadata) {
   EXPECT_EQ(saved.metadata.session, "garden.mcap");
   EXPECT_EQ(saved.metadata.cell_size, 0.1524);
   EXPECT_EQ(saved.metadata.frames_integrated, 42u);
+  EXPECT_EQ(saved.metadata.session_type, "boundary_walk");
+  EXPECT_EQ(saved.metadata.tracking_frame, "run-7");
   ASSERT_TRUE(saved.metadata.geo);
   EXPECT_EQ(saved.metadata.geo->latitude, geo.latitude);
   EXPECT_EQ(saved.metadata.geo->longitude, geo.longitude);

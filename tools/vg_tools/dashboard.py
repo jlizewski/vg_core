@@ -118,6 +118,8 @@ def walk_summary(package: Path) -> dict:
     return {
         "name": package.name,
         "session": m.get("session", ""),
+        "session_type": m.get("session_type", ""),
+        "tracking_frame": m.get("tracking_frame", ""),
         "stamp": _stamp(m.get("session", "")),
         "stages": list(stages),
         "frames": m.get("frames_integrated"),

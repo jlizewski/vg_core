@@ -31,6 +31,11 @@ struct MapMetadata {
   // had any GPS.
   std::optional<GeoReference> geo;
   std::size_t frames_integrated = 0;
+  // From the recording's session info (capture format 0.2): what it was for
+  // in guided mapping, and its tracking session's world frame. Empty for
+  // free walks and older recordings.
+  std::string session_type;
+  std::string tracking_frame;
 };
 
 struct SavedMap {
