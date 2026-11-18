@@ -232,6 +232,77 @@ TEST(GroundSegmentation, TellsWhatEachCellKnowsOfTheGround) {
   EXPECT_EQ(g.object[cell_at(g, 1.6, 0.4)], 1);
   EXPECT_EQ(g.object[cell_at(g, 0.1, 0.1)], -1);
   EXPECT_NEAR(result.segments[1].footprint_area, 0.4 * 0.4, 1e-9);  // 20 x 20 voxels.
+  // Its footprint as a box: 1.4-1.8 by 0.2-0.6 m.
+  EXPECT_NEAR(result.segments[1].center.x(), 1.6, 1e-9);
+  EXPECT_NEAR(result.segments[1].center.y(), 0.4, 1e-9);
+  EXPECT_NEAR(result.segments[1].length, 0.4, 1e-9);
+  EXPECT_NEAR(result.segments[1].width, 0.4, 1e-9);
+}
+
+TEST(GroundSegmentation, FootprintBoxFollowsADiagonalFence) {
+  // A fence 1 m high running diagonally across flat ground, one voxel thick.
+  Voxels voxels;
+  add_ground(voxels, 0, 100, 0, 100, -1, [](int x, int y) { return x == y && x >= 10 && x < 80; });
+  for (int i = 10; i < 80; ++i) {
+    for (int k = 0; k < 50; ++k) {
+      voxels.emplace_back(i, i, k);
+    }
+  }
+  const auto result = vg::segment_ground(voxels, kVoxel);
+  ASSERT_EQ(result.segments.size(), 1u);
+  const vg::MapSegment& fence = result.segments[0];
+  EXPECT_NEAR(fence.axis, 3.14159265358979323846 / 4.0, 1e-6);
+  EXPECT_NEAR(fence.length, 69 * kVoxel * std::sqrt(2.0) + kVoxel, 1e-6);
+  EXPECT_NEAR(fence.width, kVoxel, 1e-6);
+  EXPECT_NEAR(fence.center.x(), 0.9, 1e-6);  // Voxels 10-79: centers 0.21-1.59 m.
+  EXPECT_NEAR(fence.center.y(), 0.9, 1e-6);
+
+  // It stands through the element band: one element, the same box.
+  ASSERT_EQ(result.elements.size(), 1u);
+  EXPECT_EQ(result.elements[0].columns, 70u);
+  EXPECT_NEAR(result.elements[0].axis, fence.axis, 1e-9);
+  EXPECT_NEAR(result.elements[0].length, fence.length, 1e-9);
+  EXPECT_NEAR(result.elements[0].top_above_ground, 1.0, 0.03);
+}
+
+TEST(GroundSegmentation, ElementsSeparateATrunkFromItsCanopyAndLeaveLowBedsOut) {
+  // A 3 m tree (a 3 x 3 voxel trunk under a 1.2 m wide canopy, all one
+  // segment) and a 0.3 m raised bed, on flat ground.
+  Voxels voxels;
+  add_ground(voxels, 0, 150, 0, 150, -1, [](int x, int y) {
+    return (x >= 49 && x <= 51 && y >= 49 && y <= 51) || (x > 100 && x < 130 && y > 30 && y < 60);
+  });
+  for (int y = 49; y <= 51; ++y) {
+    for (int x = 49; x <= 51; ++x) {
+      for (int k = 0; k < 150; ++k) {
+        voxels.emplace_back(x, y, k);
+      }
+    }
+  }
+  for (int y = 20; y <= 80; ++y) {
+    for (int x = 20; x <= 80; ++x) {
+      if ((x - 50) * (x - 50) + (y - 50) * (y - 50) <= 900 && !(x >= 49 && x <= 51 && y >= 49 && y <= 51)) {
+        voxels.emplace_back(x, y, 145);
+        voxels.emplace_back(x, y, 149);
+      }
+    }
+  }
+  add_bed(voxels, 100, 130, 14);
+
+  const auto result = vg::segment_ground(voxels, kVoxel);
+  ASSERT_EQ(result.elements.size(), 1u);  // The trunk only.
+  const vg::MapElement& trunk = result.elements[0];
+  EXPECT_EQ(trunk.columns, 9u);
+  EXPECT_NEAR(trunk.center.x(), 1.01, 1e-9);
+  EXPECT_NEAR(trunk.center.y(), 1.01, 1e-9);
+  EXPECT_NEAR(trunk.length, 0.06, 1e-9);
+  EXPECT_NEAR(trunk.top_above_ground, 3.0, 0.03);
+
+  // Lower the band to the bed: it's an element too.
+  vg::GroundConfig low;
+  low.element_band_low = 0.1;
+  low.element_band_high = 0.25;
+  EXPECT_EQ(vg::segment_ground(voxels, kVoxel, low).elements.size(), 2u);
 }
 
 TEST(GroundSegmentation, PatchesOnlySmallEnclosedHoles) {

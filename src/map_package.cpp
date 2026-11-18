@@ -36,7 +36,7 @@ struct FileInfo {
 };
 
 // Every file a package can hold, in manifest order.
-constexpr std::array<FileInfo, 23> kFiles = {{
+constexpr std::array<FileInfo, 24> kFiles = {{
     {package_file::kMap, "", "3D map: TSDF voxel volume and geo-reference (input to every stage)"},
     {package_file::kVoxels, "m", "Occupied voxels of the 3D map as a mesh of cubes"},
     {package_file::kSurface, "m", "Height of the highest surface per cell"},
@@ -51,6 +51,9 @@ constexpr std::array<FileInfo, 23> kFiles = {{
     {package_file::kGroundObject, "",
      "The objects.csv id of the largest object over each cell, standing or overhanging"},
     {package_file::kObjects, "m", "Voxels of everything on or over the ground"},
+    {package_file::kElements, "m",
+     "What stands through the element band above the ground (posts, trunks, fences, walls): "
+     "each one's cross-section there as a box, its top above the ground and class"},
     {package_file::kObjectsTable, "m",
      "Each object on or over the ground: voxels, grounded, class, height above the ground, "
      "bounds, footprint area"},
@@ -502,7 +505,8 @@ void MapPackage::save_ground_cells(const GroundSegmentation& split, double voxel
   std::ofstream table(path(package_file::kObjectsTable));
   table.imbue(std::locale::classic());
   table << "id,voxels,grounded,class,class_share,bottom_above_ground_m,top_above_ground_m,"
-           "min_x,min_y,min_z,max_x,max_y,max_z,footprint_m2\n";
+           "min_x,min_y,min_z,max_x,max_y,max_z,footprint_m2,center_x,center_y,length_m,width_m,"
+           "axis_deg\n";
   for (std::size_t s = 0; s < split.segments.size(); ++s) {
     const MapSegment& m = split.segments[s];
     table << s + 1 << ',' << m.voxels.size() << ',' << (m.grounded ? 1 : 0) << ','
@@ -511,10 +515,25 @@ void MapPackage::save_ground_cells(const GroundSegmentation& split, double voxel
           << m.min.x() * voxel_size << ',' << m.min.y() * voxel_size << ','
           << m.min.z() * voxel_size << ',' << (m.max.x() + 1) * voxel_size << ','
           << (m.max.y() + 1) * voxel_size << ',' << (m.max.z() + 1) * voxel_size << ','
-          << m.footprint_area << '\n';
+          << m.footprint_area << ',' << m.center.x() << ',' << m.center.y() << ',' << m.length
+          << ',' << m.width << ',' << m.axis * 180.0 / kPi << '\n';
   }
   if (!table) {
     throw std::runtime_error("cannot write " + path(package_file::kObjectsTable).string());
+  }
+
+  std::ofstream elements(path(package_file::kElements));
+  elements.imbue(std::locale::classic());
+  elements << "id,columns,class,center_x,center_y,length_m,width_m,axis_deg,area_m2,"
+              "top_above_ground_m\n";
+  for (std::size_t e = 0; e < split.elements.size(); ++e) {
+    const MapElement& m = split.elements[e];
+    elements << e + 1 << ',' << m.columns << ',' << semantic_class_name(m.label) << ','
+             << m.center.x() << ',' << m.center.y() << ',' << m.length << ',' << m.width << ','
+             << m.axis * 180.0 / kPi << ',' << m.area << ',' << m.top_above_ground << '\n';
+  }
+  if (!elements) {
+    throw std::runtime_error("cannot write " + path(package_file::kElements).string());
   }
 }
 
@@ -607,6 +626,9 @@ void MapPackage::make_ground(const GroundOptions& options) {
        << cells_by_state[static_cast<std::size_t>(GroundCell::LargeHole)] << " -> "
        << package_file::kGroundState << ", " << package_file::kGroundWeight << ", "
        << package_file::kGroundObject << ", " << package_file::kObjectsTable << std::endl;
+  log_ << "ground: " << split.elements.size() << " elements standing through "
+       << config.element_band_low << "-" << config.element_band_high << " m -> "
+       << package_file::kElements << std::endl;
   if (labeled) {
     log_ << "ground: " << split.columns_not_ground_by_label
          << " columns not ground by their label; objects:";

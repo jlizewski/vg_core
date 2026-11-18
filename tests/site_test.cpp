@@ -161,6 +161,41 @@ TEST_F(SiteTest, MakesTheGroundLayerFromEveryVisit) {
   EXPECT_GT(covered, 10u);  // 0.7 x 0.8 m at 0.15 m cells: about 20.
 }
 
+TEST_F(SiteTest, MakesTheFeatureLayerFromEveryVisit) {
+  // Both walks saw the same bed: one block, seen twice, in the same place.
+  // It's 0.4 m tall: the element band is lowered to it.
+  for (const char* name : {"recording-20261009-175006", "recording-20261016-115329"}) {
+    vg::MapPackage package(root_ / "walks" / name, log_);
+    vg::GroundOptions options;
+    options.config.element_band_low = 0.15;
+    options.config.element_band_high = 0.35;
+    package.make_ground(options);
+  }
+  const fs::path site_dir = root_ / "site";
+  vg::Site site(site_dir);
+  site.add(root_ / "walks" / "recording-20261009-175006", {}, log_);
+  site.add(root_ / "walks" / "recording-20261016-115329", {}, log_, true);
+  const vg::FeatureLayer layer = site.make_feature_layer(log_);
+  // The bed's walls, as fused from a few views (one piece or a few): each
+  // seen by both walks, in the same place, within the bed.
+  ASSERT_FALSE(layer.elements.empty()) << log_.str();
+  for (const vg::SiteFeature& e : layer.elements) {
+    EXPECT_EQ(e.seen, 2) << e.id;
+    EXPECT_FALSE(e.retired) << e.id;
+    EXPECT_NEAR(e.spread, 0.0, 1e-9) << e.id;
+    EXPECT_GT(e.feature.center.x(), 0.1);  // The scene's bed: 0.2-0.9 by -0.3-0.5 m.
+    EXPECT_LT(e.feature.center.x(), 1.0);
+    EXPECT_GT(e.feature.center.y(), -0.4);
+    EXPECT_LT(e.feature.center.y(), 0.6);
+    EXPECT_NEAR(e.feature.height, 0.4, 0.1);
+  }
+  EXPECT_EQ(layer.sightings.size(), 2 * layer.elements.size());
+  const fs::path dir = site_dir / vg::feature_layer_file::kDir;
+  EXPECT_NE(read_all(dir / vg::feature_layer_file::kElements).find(layer.elements[0].id + ","),
+            std::string::npos);
+  EXPECT_TRUE(fs::is_regular_file(dir / vg::feature_layer_file::kObservations));
+}
+
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
   const fs::path root = fs::temp_directory_path() / "vg_site_model_test";
   fs::remove_all(root);

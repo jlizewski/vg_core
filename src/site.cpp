@@ -605,4 +605,96 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
   return layer;
 }
 
+FeatureLayer Site::make_feature_layer(std::ostream& log, const FeatureConfig& config) const {
+  const auto start = std::chrono::steady_clock::now();
+  const auto dir = dir_ / feature_layer_file::kDir;
+  std::filesystem::create_directories(dir);
+
+  std::vector<WalkGround> grounds;
+  for (const SiteVisit& v : visits_) {
+    grounds.push_back(load_walk_ground(package_dir(v)));
+  }
+  std::vector<WalkFeatures> walks;
+  for (std::size_t k = 0; k < visits_.size(); ++k) {
+    const SiteVisit& v = visits_[k];
+    const WalkGround& g = grounds[k];
+    WalkFeatures w;
+    w.id = g.id;
+    w.recorded = v.recorded;
+    for (const Feature& f : walk_features(g.elements, config)) {
+      w.features.push_back(to_site(f, v.site_from_map));
+    }
+    // The walk covered a spot if its ground stage knew anything of it.
+    const MapTransform map_from_site = v.site_from_map.inverse();
+    w.covers = [&g, map_from_site](const Eigen::Vector2d& site) {
+      const HeightMap& h = g.heights;
+      const Eigen::Vector2d f = (map_from_site.apply_xy(site) - h.origin) / h.cell_size;
+      const int x = static_cast<int>(std::floor(f.x()));
+      const int y = static_cast<int>(std::floor(f.y()));
+      return x >= 0 && y >= 0 && x < h.width && y < h.height &&
+             g.state[static_cast<std::size_t>(y) * static_cast<std::size_t>(h.width) +
+                     static_cast<std::size_t>(x)] != 0;
+    };
+    walks.push_back(std::move(w));
+  }
+  const FeatureLayer layer = match_features(walks, config);
+
+  {
+    std::ofstream out(dir / feature_layer_file::kElements);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "id,kind,class,center_x,center_y,length_m,width_m,axis_deg,height_m,seen,missed,"
+           "first_seen,last_seen,status,spread_m\n";
+    for (const SiteFeature& e : layer.elements) {
+      const Feature& f = e.feature;
+      out << e.id << ',' << feature_kind_name(f.kind) << ',' << semantic_class_name(f.label) << ','
+          << f.center.x() << ',' << f.center.y() << ',' << f.length << ',' << f.width << ','
+          << f.axis * 180.0 / kPi << ',' << f.height << ',' << e.seen << ',' << e.missed << ','
+          << e.first_seen << ',' << e.last_seen << ',' << (e.retired ? "retired" : "current")
+          << ',' << e.spread << '\n';
+    }
+  }
+  {
+    std::ofstream out(dir / feature_layer_file::kObservations);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "walk,element,kind,class,center_x,center_y,length_m,width_m,axis_deg,height_m\n";
+    for (const FeatureSighting& s : layer.sightings) {
+      const Feature& f = s.feature;
+      out << s.walk << ',' << s.element << ',' << feature_kind_name(f.kind) << ','
+          << semantic_class_name(f.label) << ',' << f.center.x() << ',' << f.center.y() << ','
+          << f.length << ',' << f.width << ',' << f.axis * 180.0 / kPi << ',' << f.height << '\n';
+    }
+  }
+
+  std::array<std::size_t, 3> by_kind{};
+  std::array<std::size_t, 3> repeated{};  // Seen by more than one walk.
+  std::array<std::vector<double>, 3> spreads;
+  std::size_t retired = 0;
+  for (const SiteFeature& e : layer.elements) {
+    const auto k = static_cast<std::size_t>(e.feature.kind);
+    ++by_kind[k];
+    retired += e.retired ? 1 : 0;
+    if (e.seen > 1) {
+      ++repeated[k];
+      spreads[k].push_back(e.spread);
+    }
+  }
+  log << "features: " << layer.elements.size() << " elements from " << walks.size()
+      << " walks (" << retired << " retired) -> " << feature_layer_file::kDir << "/ ("
+      << seconds_since(start) << " s)" << std::endl;
+  for (std::size_t k = 0; k < 3; ++k) {
+    std::vector<double>& s = spreads[k];
+    std::sort(s.begin(), s.end());
+    log << "features: " << feature_kind_name(static_cast<FeatureKind>(k)) << "s " << by_kind[k]
+        << ", seen by more than one walk " << repeated[k];
+    if (!s.empty()) {
+      log << ", their sightings within " << 100.0 * s[s.size() / 2] << " cm (median), "
+          << 100.0 * s.back() << " cm (farthest)";
+    }
+    log << std::endl;
+  }
+  return layer;
+}
+
 }  // namespace vg

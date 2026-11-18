@@ -1,5 +1,6 @@
 #include "vg_core/ground_segmentation.hpp"
 
+#include <Eigen/Eigenvalues>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -7,6 +8,7 @@
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
+#include <tuple>
 #include <utility>
 
 namespace vg {
@@ -24,6 +26,12 @@ struct VoxelHash {
   }
 };
 using VoxelSet = std::unordered_set<Eigen::Vector3i, VoxelHash>;
+
+struct ColumnHash {
+  std::size_t operator()(const Eigen::Vector2i& c) const {
+    return static_cast<std::size_t>(c.x()) * 73856093u ^ static_cast<std::size_t>(c.y()) * 19349669u;
+  }
+};
 
 constexpr std::array<std::array<int, 2>, 8> kNeighbors8 = {
     {{-1, -1}, {0, -1}, {1, -1}, {-1, 0}, {1, 0}, {-1, 1}, {0, 1}, {1, 1}}};
@@ -248,6 +256,68 @@ std::vector<char> find_ground_columns(const Grid& grid, const std::vector<int>& 
     }
   }
   return ground;
+}
+
+struct Box {
+  Eigen::Vector2d center = Eigen::Vector2d::Zero();
+  double length = 0.0;
+  double width = 0.0;
+  double axis = 0.0;
+};
+
+// Voxel columns as an oriented box: their centers' principal axes, and their
+// extent along each, one voxel wider for the voxels' own size.
+template <typename Columns>
+Box box_of(const Columns& columns, double voxel_size) {
+  Box box;
+  Eigen::Vector2d mean = Eigen::Vector2d::Zero();
+  for (const Eigen::Vector2i& c : columns) {
+    mean += (c.cast<double>().array() + 0.5).matrix() * voxel_size;
+  }
+  mean /= static_cast<double>(columns.size());
+  Eigen::Matrix2d scatter = Eigen::Matrix2d::Zero();
+  for (const Eigen::Vector2i& c : columns) {
+    const Eigen::Vector2d d = (c.cast<double>().array() + 0.5).matrix() * voxel_size - mean;
+    scatter += d * d.transpose();
+  }
+  const Eigen::SelfAdjointEigenSolver<Eigen::Matrix2d> axes(scatter);
+  const Eigen::Vector2d major = axes.eigenvectors().col(1);  // Largest eigenvalue last.
+  const Eigen::Vector2d minor(-major.y(), major.x());
+  double lo_major = std::numeric_limits<double>::infinity();
+  double hi_major = -lo_major;
+  double lo_minor = lo_major;
+  double hi_minor = -lo_major;
+  for (const Eigen::Vector2i& c : columns) {
+    const Eigen::Vector2d d = (c.cast<double>().array() + 0.5).matrix() * voxel_size - mean;
+    lo_major = std::min(lo_major, d.dot(major));
+    hi_major = std::max(hi_major, d.dot(major));
+    lo_minor = std::min(lo_minor, d.dot(minor));
+    hi_minor = std::max(hi_minor, d.dot(minor));
+  }
+  // The box's own center, which for a lopsided footprint isn't the mean.
+  box.center = mean + major * (lo_major + hi_major) / 2.0 + minor * (lo_minor + hi_minor) / 2.0;
+  box.length = hi_major - lo_major + voxel_size;
+  box.width = hi_minor - lo_minor + voxel_size;
+  double angle = std::atan2(major.y(), major.x());
+  constexpr double kPi = 3.14159265358979323846;
+  if (angle < 0.0) {
+    angle += kPi;
+  }
+  box.axis = angle >= kPi ? angle - kPi : angle;
+  return box;
+}
+
+// The segment's footprint as an oriented box: its voxels seen from above.
+void footprint_box(MapSegment& segment, double voxel_size) {
+  std::unordered_set<Eigen::Vector2i, ColumnHash> columns;
+  for (const auto& v : segment.voxels) {
+    columns.insert(v.head<2>());
+  }
+  const Box box = box_of(columns, voxel_size);
+  segment.center = box.center;
+  segment.length = box.length;
+  segment.width = box.width;
+  segment.axis = box.axis;
 }
 
 // Patches the cells of map marked in fill (all NaN) by harmonic interpolation
@@ -544,6 +614,7 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
       }
     }
     result.segments[s].footprint_area = static_cast<double>(footprint) * cs * cs;
+    footprint_box(result.segments[s], voxel_size);
   }
   std::vector<char> large_hole(cells.cells(), 0);
   std::vector<char> seen(cells.cells(), 0);
@@ -635,6 +706,85 @@ GroundSegmentation segment_ground(const std::vector<Eigen::Vector3i>& voxels, do
     segment.bottom_above_ground = bottom_above;
     segment.top_above_ground = top_above;
   }
+
+  // Elements: the columns with enough non-ground voxels in the band above the
+  // ground (a stray voxel or two bridging two things doesn't count), in
+  // 8-connected groups.
+  struct Column {
+    double top = -std::numeric_limits<double>::infinity();  // Above the ground.
+    int in_band = 0;  // Voxels in the band.
+    std::array<std::size_t, kSemanticClasses> labels{};  // Of its voxels in the band.
+  };
+  std::unordered_map<Eigen::Vector2i, Column, ColumnHash> column_of;
+  for (std::size_t i = 0; i < voxels.size(); ++i) {
+    const Eigen::Vector3i& v = voxels[i];
+    if (ground.count(v) != 0) {
+      continue;
+    }
+    const Eigen::Vector2i c = cell_of(v.x(), v.y());
+    const float g = map.heights[cells.index(c.x(), c.y())];
+    if (std::isnan(g)) {
+      continue;
+    }
+    Column& column = column_of[v.head<2>()];
+    column.top = std::max(column.top, (v.z() + 1) * voxel_size - g);
+    const double middle = (v.z() + 0.5) * voxel_size - g;
+    if (middle >= config.element_band_low && middle <= config.element_band_high) {
+      ++column.in_band;
+      if (labeled) {
+        ++column.labels[static_cast<std::size_t>(labels[i])];
+      }
+    }
+  }
+  std::unordered_set<Eigen::Vector2i, ColumnHash> grouped;
+  const auto counts = [&](const Column& c) { return c.in_band >= config.element_min_band_voxels; };
+  for (const auto& [start, first] : column_of) {
+    if (!counts(first) || grouped.count(start) != 0) {
+      continue;
+    }
+    std::vector<Eigen::Vector2i> group{start};
+    grouped.insert(start);
+    for (std::size_t m = 0; m < group.size(); ++m) {
+      for (const auto& d : kNeighbors8) {
+        const Eigen::Vector2i n = group[m] + Eigen::Vector2i(d[0], d[1]);
+        const auto it = column_of.find(n);
+        if (it != column_of.end() && counts(it->second) && grouped.insert(n).second) {
+          group.push_back(n);
+        }
+      }
+    }
+    if (static_cast<int>(group.size()) < config.element_min_columns) {
+      continue;
+    }
+    MapElement element;
+    const Box box = box_of(group, voxel_size);
+    element.center = box.center;
+    element.length = box.length;
+    element.width = box.width;
+    element.axis = box.axis;
+    element.columns = group.size();
+    element.area = static_cast<double>(group.size()) * voxel_size * voxel_size;
+    std::array<std::size_t, kSemanticClasses> votes{};
+    element.top_above_ground = -std::numeric_limits<double>::infinity();
+    for (const Eigen::Vector2i& c : group) {
+      const Column& column = column_of.at(c);
+      element.top_above_ground = std::max(element.top_above_ground, column.top);
+      for (std::size_t k = 1; k < kSemanticClasses; ++k) {  // Unknown doesn't vote.
+        votes[k] += column.labels[k];
+      }
+    }
+    const auto best = std::max_element(votes.begin(), votes.end()) - votes.begin();
+    if (votes[static_cast<std::size_t>(best)] > 0) {
+      element.label = static_cast<SemanticClass>(best);
+    }
+    result.elements.push_back(element);
+  }
+  // Largest first; the same map always gives the same order.
+  std::sort(result.elements.begin(), result.elements.end(),
+            [](const MapElement& a, const MapElement& b) {
+              return std::tie(b.columns, a.center.x(), a.center.y()) <
+                     std::tie(a.columns, b.center.x(), b.center.y());
+            });
   return result;
 }
 

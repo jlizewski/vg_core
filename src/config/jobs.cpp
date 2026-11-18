@@ -1,6 +1,8 @@
 #include "vg_core/config/jobs.hpp"
 
 #include <algorithm>
+#include <fstream>
+#include <string>
 #include <map>
 #include <utility>
 
@@ -13,6 +15,15 @@ namespace vg::config {
 
 namespace {
 
+// Whether the package has the ground stage outputs the site's layers need.
+bool objects_table_current(const std::filesystem::path& dir) {
+  std::ifstream in(dir / package_file::kObjectsTable);
+  std::string header;
+  std::getline(in, header);
+  return header.find("axis_deg") != std::string::npos &&
+         std::filesystem::is_regular_file(dir / package_file::kElements);
+}
+
 // Runs the stages a package needs for registration that it hasn't run yet,
 // with the settings it was made with.
 void prepare_for_site(const std::filesystem::path& dir, std::ostream& log) {
@@ -20,7 +31,8 @@ void prepare_for_site(const std::filesystem::path& dir, std::ostream& log) {
   for (const auto& [file, stage] :
        {std::pair{package_file::kSurface, "surface"}, std::pair{package_file::kGroundState, "ground"},
         std::pair{package_file::kTerrain, "terrain"}}) {
-    if (!stages.empty() || !std::filesystem::is_regular_file(dir / file)) {
+    if (!stages.empty() || !std::filesystem::is_regular_file(dir / file) ||
+        (std::string(stage) == "ground" && !objects_table_current(dir))) {
       stages.push_back(stage);  // And everything after it.
     }
   }
@@ -136,6 +148,7 @@ void make_site_ground(const std::filesystem::path& site_dir,
     prepare_for_site(site.package_dir(visit), log);
   }
   site.make_ground_layer(log, config.ground_layer);
+  site.make_feature_layer(log, config.features);
 }
 
 void make_site_maps(const std::filesystem::path& site_dir,

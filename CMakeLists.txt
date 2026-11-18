@@ -47,6 +47,7 @@ add_library(vg_core
   src/depth_filter.cpp
   src/depth_spool.cpp
   src/diagnostics.cpp
+  src/features.cpp
   src/geo_reference.cpp
   src/ground_layer.cpp
   src/ground_segmentation.cpp

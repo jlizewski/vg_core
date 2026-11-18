@@ -46,9 +46,10 @@ bool add_to_site(const std::filesystem::path& site_dir,
 void make_site_maps(const std::filesystem::path& site_dir,
                     const std::vector<std::string>& settings, std::ostream& log);
 
-// vg site ground: builds the site's ground layer (layers/ground/) with the
-// ground_layer settings, first running the ground stage on any visit whose
-// package predates its per-cell outputs.
+// vg site ground: builds the site's ground layer (layers/ground/) and feature
+// elements (layers/features/) with the ground_layer and features settings,
+// first running the ground stage on any visit whose package predates its
+// per-cell outputs or footprint boxes.
 void make_site_ground(const std::filesystem::path& site_dir,
                       const std::vector<std::string>& settings, std::ostream& log);
 

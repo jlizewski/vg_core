@@ -268,6 +268,15 @@ ParamSet bind(MappingConfig& c) {
         "Unseen holes in the ground up to this big are patched, in square meters (holes under "
         "objects always are).",
         "--max-hole-area");
+  p.add("ground.element_band_low", c.ground.element_band_low,
+        "Elements (elements.csv: posts, trunks, fences, walls) are what stands through this "
+        "band of heights above the ground, in meters: from here...");
+  p.add("ground.element_band_high", c.ground.element_band_high, "... to here.");
+  p.add("ground.element_min_columns", c.ground.element_min_columns,
+        "An element has at least this many voxel columns in the band.");
+  p.add("ground.element_min_band_voxels", c.ground.element_min_band_voxels,
+        "A column counts with at least this many voxels in the band (a stray voxel or two "
+        "bridging two things doesn't join them).");
 
   p.section("ground.labels",
             "Semantic labels helping find the ground, when the map has them: geometry still "
@@ -430,6 +439,28 @@ ParamSet bind(MappingConfig& c) {
   p.add("ground_layer.latest_wins", c.ground_layer.latest_wins,
         "Take the latest walk that measured a cell instead, as the site's current maps do "
         "(for comparison).");
+
+  p.section("features",
+            "The site's feature elements (vg site ground, layers/features/): what stands on the "
+            "ground, as posts, lines and blocks, matched across walks.");
+  FeatureConfig& fc = c.features;
+  p.add("features.min_height", fc.min_height,
+        "Objects lower than this over the ground (m) aren't elements.");
+  p.add("features.post_max_size", fc.post_max_size,
+        "A post (trunk, post, pole) fits in a square this size (m).");
+  p.add("features.line_min_length", fc.line_min_length,
+        "A line (fence, wall) is at least this long (m)...");
+  p.add("features.line_max_aspect", fc.line_max_aspect, "... and no wider than this share of it.");
+  p.add("features.block_min_area", fc.block_min_area,
+        "A block's box (bed, bin, shed) covers at least this much ground (m^2).");
+  p.add("features.small_block_size", fc.small_block_size,
+        "Posts and blocks no longer than this (m) can be the same element.");
+  p.add("features.match_distance", fc.match_distance,
+        "Sightings this close (m; for lines, across the line) are the same element.");
+  p.add("features.match_angle_deg", fc.match_angle_deg,
+        "Lines within this many degrees of each other can be the same element.");
+  p.add("features.retire_after_misses", fc.retire_after_misses,
+        "An element missed by this many walks in a row that covered its spot is retired.");
 
   p.section("layers", "Diagnostic: where a second surface sits over the first (ghosts).");
   p.add("layers.min_gap_voxels", c.layers.min_gap_voxels,

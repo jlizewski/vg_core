@@ -14,6 +14,7 @@
 //   ground_object.asc  the object over each cell (objects.csv id)  <- ground stage
 //   objects.ply     everything on or over the ground       <- ground stage
 //   objects.csv     each object: class, height, bounds, footprint  <- ground stage
+//   elements.csv    what stands through waist height: posts, fences, walls  <- ground stage
 //   terrain.asc     smooth contour of the ground (m)       <- terrain stage
 //   features.asc    surface height above the terrain (m)   <- terrain stage
 //   sky.vgs         where sky was seen, and blocked beyond depth  <- build, when labeled
@@ -60,6 +61,7 @@ inline constexpr const char* kGroundWeight = "ground_weight.asc";
 inline constexpr const char* kGroundObject = "ground_object.asc";
 inline constexpr const char* kObjects = "objects.ply";
 inline constexpr const char* kObjectsTable = "objects.csv";
+inline constexpr const char* kElements = "elements.csv";
 inline constexpr const char* kTerrain = "terrain.asc";
 inline constexpr const char* kFeatures = "features.asc";
 inline constexpr const char* kSky = "sky.vgs";

@@ -41,6 +41,18 @@ struct GroundConfig {
   // always patched, whatever their size.
   double max_hole_area = 1.0;
 
+  // Elements (GroundSegmentation::elements): what stands through this band
+  // of heights above the ground, in meters, in groups of at least
+  // element_min_columns voxel columns. At about waist height a fence is just
+  // a fence and a trunk just a trunk, apart from the shrubs and beds at their
+  // foot and the canopy over them, which whole segments join together.
+  double element_band_low = 0.6;
+  double element_band_high = 1.4;
+  int element_min_columns = 3;
+  // A column counts with at least this many voxels in the band: a stray
+  // voxel or two bridging two things doesn't join them.
+  int element_min_band_voxels = 2;
+
   // Semantic labels, when the voxels have them (see segment_ground()):
   // geometry finds the ground, labels help it. A column whose bottom voxel
   // is labeled one of not_ground_labels (e.g. a low plant read as raised
@@ -80,6 +92,14 @@ struct MapSegment {
   double top_above_ground = 0.0;
   // Area of the ground map's cells it has voxels over, in square meters.
   double footprint_area = 0.0;
+  // Its footprint as an oriented box, from the principal axes of its voxels
+  // seen from above: the center (m), its extent along the major axis
+  // (length) and across it (width), and the major axis' direction (radians
+  // from x, in [0, pi)).
+  Eigen::Vector2d center = Eigen::Vector2d::Zero();
+  double length = 0.0;
+  double width = 0.0;
+  double axis = 0.0;
   // The class most of its labeled voxels have (Unknown if none are), and the
   // share of its labeled voxels that have it.
   SemanticClass label = SemanticClass::Unknown;
@@ -119,6 +139,22 @@ struct GroundMap {
   GroundCell state_at(int x, int y) const { return state[index(x, y)]; }
 };
 
+// Something standing through the element band (GroundConfig): a post, a
+// trunk, a fence, a wall, as seen at that height.
+struct MapElement {
+  // Its cross-section in the band as an oriented box (as MapSegment's).
+  Eigen::Vector2d center = Eigen::Vector2d::Zero();
+  double length = 0.0;
+  double width = 0.0;
+  double axis = 0.0;
+  std::size_t columns = 0;  // Voxel columns it has in the band.
+  double area = 0.0;        // Square meters.
+  // The top of what stands in those columns, above the ground (m), and the
+  // class most of its labeled voxels in the band have.
+  double top_above_ground = 0.0;
+  SemanticClass label = SemanticClass::Unknown;
+};
+
 struct GroundSegmentation {
   std::vector<Eigen::Vector3i> ground_voxels;
   // Columns left out of the ground because of their label.
@@ -126,6 +162,8 @@ struct GroundSegmentation {
   // Largest first.
   std::vector<MapSegment> segments;
   GroundMap ground;
+  // Largest first.
+  std::vector<MapElement> elements;
 };
 
 // Splits occupied voxels (edge voxel_size meters) into ground and segments.

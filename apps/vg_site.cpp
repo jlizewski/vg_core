@@ -7,7 +7,9 @@
 //
 // ground builds the site's ground layer (layers/ground/, see
 // vg_core/ground_layer.hpp): every visit's ground combined, with the edits in
-// layers/ground/edits.csv applied (settings: the ground_layer section).
+// layers/ground/edits.csv applied; and its feature elements
+// (layers/features/, vg_core/features.hpp): posts, lines and blocks matched
+// across visits. Settings: the ground_layer and features sections.
 //
 // add registers each package against the visits so far (the first one sets
 // the site's frame) and remakes current/. A package missing its terrain maps

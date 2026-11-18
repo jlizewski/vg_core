@@ -75,6 +75,12 @@ struct WalkObject {
   bool grounded = false;          // Stands on the ground (false: an overhang).
   double top_above_ground = 0.0;  // Meters; NaN if unknown.
   double footprint_area = 0.0;    // Square meters.
+  // Its footprint as an oriented box (MapSegment), in the walk's map frame;
+  // NaN center if the table predates it.
+  Eigen::Vector2d center = Eigen::Vector2d::Constant(std::numeric_limits<double>::quiet_NaN());
+  double length = 0.0;
+  double width = 0.0;
+  double axis = 0.0;  // Radians.
 };
 
 // One walk's ground, in its own map frame (the ground stage's outputs), and
@@ -94,6 +100,9 @@ struct WalkGround {
   // object then counts as covered).
   std::vector<int> object;
   std::vector<WalkObject> objects;  // objects.csv, in id order.
+  // elements.csv: what stood through the element band (all grounded; their
+  // area as footprint_area). Empty if the package predates it.
+  std::vector<WalkObject> elements;
 };
 
 // Loads a package's ground stage outputs. Throws std::runtime_error if they're

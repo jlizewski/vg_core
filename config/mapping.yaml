@@ -159,6 +159,16 @@ ground:
   # Unseen holes in the ground up to this big are patched, in square meters
   # (holes under objects always are).
   max_hole_area: 1
+  # Elements (elements.csv: posts, trunks, fences, walls) are what stands
+  # through this band of heights above the ground, in meters: from here...
+  element_band_low: 0.6
+  # ... to here.
+  element_band_high: 1.4
+  # An element has at least this many voxel columns in the band.
+  element_min_columns: 3
+  # A column counts with at least this many voxels in the band (a stray voxel or
+  # two bridging two things doesn't join them).
+  element_min_band_voxels: 2
   # Semantic labels helping find the ground, when the map has them: geometry
   # still decides, labels veto and rescue.
   labels:
@@ -337,6 +347,29 @@ ground_layer:
   # Take the latest walk that measured a cell instead, as the site's current
   # maps do (for comparison).
   latest_wins: false
+
+# The site's feature elements (vg site ground, layers/features/): what stands on
+# the ground, as posts, lines and blocks, matched across walks.
+features:
+  # Objects lower than this over the ground (m) aren't elements.
+  min_height: 0.3
+  # A post (trunk, post, pole) fits in a square this size (m).
+  post_max_size: 0.6
+  # A line (fence, wall) is at least this long (m)...
+  line_min_length: 1
+  # ... and no wider than this share of it.
+  line_max_aspect: 0.3
+  # A block's box (bed, bin, shed) covers at least this much ground (m^2).
+  block_min_area: 0.25
+  # Posts and blocks no longer than this (m) can be the same element.
+  small_block_size: 1
+  # Sightings this close (m; for lines, across the line) are the same element.
+  match_distance: 0.5
+  # Lines within this many degrees of each other can be the same element.
+  match_angle_deg: 20
+  # An element missed by this many walks in a row that covered its spot is
+  # retired.
+  retire_after_misses: 2
 
 # Diagnostic: where a second surface sits over the first (ghosts).
 layers:

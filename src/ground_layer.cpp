@@ -257,9 +257,48 @@ std::vector<WalkObject> load_walk_objects(const std::filesystem::path& path) {
     o.label = parse_semantic_class(f[3]).value_or(SemanticClass::Unknown);
     o.top_above_ground = table_number(f[6]);
     o.footprint_area = table_number(f[13]);
+    if (f.size() >= 19) {
+      o.center = {table_number(f[14]), table_number(f[15])};
+      o.length = table_number(f[16]);
+      o.width = table_number(f[17]);
+      o.axis = table_number(f[18]) * 3.14159265358979323846 / 180.0;
+    }
     objects.push_back(o);
   }
   return objects;
+}
+
+// elements.csv: id,columns,class,center_x,center_y,length_m,width_m,axis_deg,
+// area_m2,top_above_ground_m. Missing: none.
+std::vector<WalkObject> load_walk_elements(const std::filesystem::path& path) {
+  std::vector<WalkObject> elements;
+  std::ifstream in(path);
+  std::string line;
+  std::getline(in, line);  // Header.
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    std::vector<std::string> f;
+    std::istringstream fields(line);
+    for (std::string field; std::getline(fields, field, ',');) {
+      f.push_back(field);
+    }
+    if (f.size() < 10) {
+      continue;
+    }
+    WalkObject e;
+    e.grounded = true;
+    e.label = parse_semantic_class(f[2]).value_or(SemanticClass::Unknown);
+    e.center = {table_number(f[3]), table_number(f[4])};
+    e.length = table_number(f[5]);
+    e.width = table_number(f[6]);
+    e.axis = table_number(f[7]) * 3.14159265358979323846 / 180.0;
+    e.footprint_area = table_number(f[8]);
+    e.top_above_ground = table_number(f[9]);
+    elements.push_back(e);
+  }
+  return elements;
 }
 
 }  // namespace
@@ -295,6 +334,7 @@ WalkGround load_walk_ground(const std::filesystem::path& package) {
     walk.object.push_back(std::isnan(id) || id < 1.0f ? -1 : static_cast<int>(id) - 1);
   }
   walk.objects = load_walk_objects(package / package_file::kObjectsTable);
+  walk.elements = load_walk_elements(package / package_file::kElements);
   return walk;
 }
 
