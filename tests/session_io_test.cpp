@@ -54,6 +54,8 @@ vg::io::SessionInfo test_info() {
   info.start_time = 5 * kMs;
   info.utc_offset_ns = 1'700'000'000'000'000'000;
   info.notes = "raised bed";
+  info.session_type = vg::io::session_type::kBoundaryWalk;
+  info.tracking_frame = "3f2a9c1e-run-1";
   return info;
 }
 
@@ -117,6 +119,11 @@ TEST(SessionIo, RoundTripsEveryMessageType) {
   imu.angular_velocity = {0.1, -0.2, 0.3};
   imu.linear_acceleration = {0.0, 0.1, 9.81};
 
+  vg::MagnetometerSample mag;
+  mag.timestamp = 35 * kMs;
+  mag.field = {21.5, -4.25, -40.0};
+  mag.accuracy = 3;
+
   vg::GpsFix fix;
   fix.timestamp = 40 * kMs;
   fix.latitude = 45.5231;
@@ -133,14 +140,17 @@ TEST(SessionIo, RoundTripsEveryMessageType) {
     writer.write(depth);
     writer.write(status);
     writer.write(imu);
+    writer.write(SessionMessage{mag});
     writer.write(SessionMessage{fix});
   }
 
   const auto messages = read_all(file.path());
-  ASSERT_EQ(messages.size(), 9u);
+  ASSERT_EQ(messages.size(), 10u);
 
   const auto& info = std::get<vg::io::SessionInfo>(messages[0]);
-  EXPECT_EQ(info.format_version, "0.1");
+  EXPECT_EQ(info.format_version, "0.2");
+  EXPECT_EQ(info.session_type, "boundary_walk");
+  EXPECT_EQ(info.tracking_frame, "3f2a9c1e-run-1");
   EXPECT_EQ(info.producer, "vg_core tests");
   EXPECT_EQ(info.platform, "synthetic");
   EXPECT_EQ(info.start_time, 5 * kMs);
@@ -183,11 +193,30 @@ TEST(SessionIo, RoundTripsEveryMessageType) {
   EXPECT_EQ(i.linear_acceleration, imu.linear_acceleration);
   EXPECT_EQ(i.angular_velocity, imu.angular_velocity);
 
-  const auto& g = std::get<vg::GpsFix>(messages[8]);
+  const auto& m = std::get<vg::MagnetometerSample>(messages[8]);
+  EXPECT_EQ(m.timestamp, mag.timestamp);
+  EXPECT_EQ(m.field, mag.field);
+  EXPECT_EQ(m.accuracy, 3);
+
+  const auto& g = std::get<vg::GpsFix>(messages[9]);
   EXPECT_DOUBLE_EQ(g.latitude, fix.latitude);
   EXPECT_DOUBLE_EQ(g.longitude, fix.longitude);
   EXPECT_DOUBLE_EQ(g.altitude, fix.altitude);
   EXPECT_EQ(g.position_covariance, fix.position_covariance);
+}
+
+TEST(SessionIo, AFreeWalkHasNoSessionTypeOrFrame) {
+  TempFile file("vg_session_free");
+  vg::io::SessionInfo info = test_info();
+  info.session_type.clear();
+  info.tracking_frame.clear();
+  { vg::io::SessionWriter writer(file.path(), info); }
+  const auto messages = read_all(file.path());
+  ASSERT_EQ(messages.size(), 1u);
+  const auto& back = std::get<vg::io::SessionInfo>(messages[0]);
+  EXPECT_TRUE(back.session_type.empty());
+  EXPECT_TRUE(back.tracking_frame.empty());
+  EXPECT_EQ(back.notes, "raised bed");
 }
 
 TEST(SessionIo, ReadsDepthWithoutConfidence) {

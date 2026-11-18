@@ -62,6 +62,14 @@ struct ImuSample {
   Eigen::Vector3d linear_acceleration = Eigen::Vector3d::Zero();  // m/s^2
 };
 
+// One magnetometer sample in the body frame, for a compass heading.
+struct MagnetometerSample {
+  Timestamp timestamp = 0;
+  Eigen::Vector3d field = Eigen::Vector3d::Zero();  // Microtesla, platform-calibrated.
+  // 0 unreliable, 1 low, 2 medium, 3 high (Android's SENSOR_STATUS_*); 0 if unknown.
+  int accuracy = 0;
+};
+
 // GNSS fix. WGS84 degrees, altitude in meters above the ellipsoid.
 struct GpsFix {
   Timestamp timestamp = 0;

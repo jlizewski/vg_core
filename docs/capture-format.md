@@ -1,4 +1,4 @@
-# vg capture format (v0.1, draft)
+# vg capture format (v0.2, draft)
 
 This is the input format for the vg_core map builder. A **capture session** is a
 single [MCAP](https://mcap.dev) file that holds everything recorded during one
@@ -48,7 +48,7 @@ and inspected in Foxglove Studio, which is a viewer only and not a dependency.
 - Chunk compression: `zstd`. (vg_core_io is built without LZ4, so LZ4-compressed
   files from other tools can't be read yet.)
 - The file carries an MCAP metadata record named `vg_capture` with keys
-  `format_version` (e.g. `0.1`) and `producer` (e.g. `vg_android 0.3.0`).
+  `format_version` (e.g. `0.2`) and `producer` (e.g. `vg_android 0.3.0`).
 
 ## Conventions
 
@@ -83,7 +83,7 @@ producers convert to the conventions above before writing.
 
 | Topic | Schema | Notes |
 | --- | --- | --- |
-| `/vg/session` | `vg.SessionInfo` | Exactly one message, written first. |
+| `/vg/session` | `vg.SessionInfo` | Exactly one message, written first. Says what the session is for (`session_type`) and which tracking session made it (`tracking_frame`): see [Guided mapping sessions](#guided-mapping-sessions). |
 | `/tf_static` | `foxglove.FrameTransforms` | Fixed extrinsics: `body` → each `cam/<name>`, `body` → `gps`. |
 | `/cam/<name>/calibration` | `foxglove.CameraCalibration` | Intrinsics per camera. Rewrite if they change (e.g. autofocus). |
 
@@ -93,6 +93,7 @@ producers convert to the conventions above before writing.
 | --- | --- | --- |
 | `/cam/<name>/image` | `foxglove.CompressedImage` (`jpeg`/`png`) or `foxglove.RawImage` | One per camera. Stereo rigs write `left` and `right`. |
 | `/imu` | `vg.Imu` | Gyro + accelerometer in `body`, at native rate (100 Hz or more preferred). |
+| `/mag` | `vg.MagneticField` | Optional (since 0.2). Magnetometer in `body`, platform-calibrated, microtesla, with the platform's accuracy (0-3), at native rate (25 Hz or more). For a compass heading: a prior for placing a session in a site when it starts. |
 | `/gps` | `foxglove.LocationFix` | With `position_covariance` filled from reported accuracy. |
 
 ### Derived layer (optional)
@@ -115,6 +116,31 @@ producers convert to the conventions above before writing.
 | iOS (ARKit) | `capturedImage`, CoreMotion IMU, CoreLocation GPS, `ARCamera.intrinsics` | `sceneDepth` + `confidenceMap` on LiDAR devices, `ARCamera.transform`, `trackingState` |
 | Stereo + IMU + GPS rig | `left` + `right` images, IMU, GPS, full stereo calibration | Only if the camera SDK provides depth / VIO (ZED, RealSense, OAK-D) |
 
+## Guided mapping sessions
+
+Guided mapping ([design/guided-mapping.md](design/guided-mapping.md)) maps a
+site in steps: a boundary walk, then ground fill, then stations for the
+skyline, structures and canopy. **Each step is its own recording** (its own
+`.vgcap.mcap`), so a step can be replayed, repaired or redone on its own, and a
+crash loses one step, not the run. Two `vg.SessionInfo` fields (since 0.2) tie
+them together:
+
+- **`session_type`**: what the recording is for: `boundary_walk`,
+  `ground_fill`, `skyline_station`, `structure_station`, `canopy_station` or
+  `relocalization`. Empty for a free walk (every recording before 0.2).
+- **`tracking_frame`**: an identifier for the tracker's world frame. The
+  producer makes a new one (any unique string; a UUID) each time its tracking
+  session starts or restarts (on ARCore: a new or resumed `Session`), and
+  writes the same value into every recording made while that session keeps
+  running. Recordings with the same `tracking_frame` share one world frame:
+  their poses are directly comparable, with no registration between them.
+  Empty if unknown.
+
+A mapping run is therefore several recordings with one `tracking_frame`,
+taken one after another without restarting the tracker. If tracking is lost
+for good (the session is restarted), later recordings get a new
+`tracking_frame` and are placed in the site like a new visit.
+
 ## Minimum for mapping
 
 A session is mappable if it has session info, calibration, GPS (recommended, not
@@ -126,6 +152,10 @@ required), and **one** of:
 
 ## Versioning
 
+History: **0.2** added `session_type` and `tracking_frame` to
+`vg.SessionInfo`, and the `/mag` topic. Readers of 0.2 read 0.1 files
+unchanged (the new fields are empty, `/mag` absent).
+
 `format_version` is `MAJOR.MINOR`. Adding topics or optional fields bumps
 MINOR; readers ignore topics they don't know. Changing or removing anything
 bumps MAJOR. Until 1.0 the format may still change without a MAJOR bump.
@@ -134,7 +164,7 @@ bumps MAJOR. Until 1.0 the format may still change without a MAJOR bump.
 
 - Video: storing images as `foxglove.CompressedVideo` (H.264/H.265) would cut
   file size a lot but makes per-frame access harder. Starting with JPEG.
-- Whether to also record magnetometer and barometer (useful for heading and
-  altitude). Easy to add as MINOR topics later.
+- Whether to also record the barometer (useful for altitude). The
+  magnetometer was added in 0.2.
 - Whether vg_core should read protobuf directly or use a lighter decoder for
   the handful of schemas it needs.

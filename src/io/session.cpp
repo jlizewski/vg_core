@@ -12,6 +12,7 @@ Timestamp timestamp_of(const SessionMessage& message) {
     Timestamp operator()(const PoseStamped& m) const { return m.timestamp; }
     Timestamp operator()(const TrackingStatus& m) const { return m.timestamp; }
     Timestamp operator()(const ImuSample& m) const { return m.timestamp; }
+    Timestamp operator()(const MagnetometerSample& m) const { return m.timestamp; }
     Timestamp operator()(const GpsFix& m) const { return m.timestamp; }
   };
   return std::visit(Visitor{}, message);

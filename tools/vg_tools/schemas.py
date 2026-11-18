@@ -26,6 +26,7 @@ SCHEMAS = {
     "foxglove.SceneUpdate": "foxglove/SceneUpdate.proto",
     "vg.GeoPose": "vg/geo_pose.proto",
     "vg.Imu": "vg/imu.proto",
+    "vg.MagneticField": "vg/magnetic_field.proto",
     "vg.SessionInfo": "vg/session_info.proto",
     "vg.TrackingStatus": "vg/tracking_status.proto",
 }

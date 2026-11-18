@@ -130,6 +130,9 @@ struct SessionReader::Impl {
     if (topic == "/imu") {
       return SessionMessage{decode_imu(data)};
     }
+    if (topic == "/mag") {
+      return SessionMessage{decode_magnetometer(data)};
+    }
     if (topic == "/gps") {
       return SessionMessage{decode_gps(data)};
     }

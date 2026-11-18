@@ -23,6 +23,7 @@ std::string encode_labels(const DepthImage& depth);
 std::string encode(const PoseStamped& pose);
 std::string encode(const TrackingStatus& status);
 std::string encode(const ImuSample& imu);
+std::string encode(const MagnetometerSample& mag);
 std::string encode(const GpsFix& fix);
 
 SessionInfo decode_session_info(std::string_view data);
@@ -51,6 +52,7 @@ std::vector<std::uint8_t> labels_from_raw(const RawImage& image);
 PoseStamped decode_pose(std::string_view data);
 TrackingStatus decode_tracking_status(std::string_view data);
 ImuSample decode_imu(std::string_view data);
+MagnetometerSample decode_magnetometer(std::string_view data);
 GpsFix decode_gps(std::string_view data);
 
 }  // namespace vg::io::detail

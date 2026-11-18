@@ -128,6 +128,10 @@ void SessionWriter::write(const ImuSample& imu) {
   impl_->write("/imu", "vg.Imu", imu.timestamp, detail::encode(imu));
 }
 
+void SessionWriter::write(const MagnetometerSample& mag) {
+  impl_->write("/mag", "vg.MagneticField", mag.timestamp, detail::encode(mag));
+}
+
 void SessionWriter::write(const GpsFix& fix) {
   impl_->write("/gps", "foxglove.LocationFix", fix.timestamp, detail::encode(fix));
 }

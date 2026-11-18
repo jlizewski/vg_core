@@ -92,6 +92,12 @@ std::string encode(const SessionInfo& info) {
   w.timestamp_field(5, info.start_time);
   w.int64_field(6, info.utc_offset_ns);
   w.bytes_field(7, info.notes);
+  if (!info.session_type.empty()) {
+    w.bytes_field(8, info.session_type);
+  }
+  if (!info.tracking_frame.empty()) {
+    w.bytes_field(9, info.tracking_frame);
+  }
   return w.data();
 }
 
@@ -122,6 +128,12 @@ SessionInfo decode_session_info(std::string_view data) {
         break;
       case 7:
         info.notes = f.bytes;
+        break;
+      case 8:
+        info.session_type = f.bytes;
+        break;
+      case 9:
+        info.tracking_frame = f.bytes;
         break;
       default:
         break;
@@ -470,6 +482,39 @@ ImuSample decode_imu(std::string_view data) {
     }
   }
   return imu;
+}
+
+std::string encode(const MagnetometerSample& mag) {
+  ProtoWriter w;
+  w.timestamp_field(1, mag.timestamp);
+  w.bytes_field(2, "body");
+  w.message_field(3, vector3(mag.field));
+  if (mag.accuracy != 0) {
+    w.varint_field(4, static_cast<std::uint64_t>(mag.accuracy));
+  }
+  return w.data();
+}
+
+MagnetometerSample decode_magnetometer(std::string_view data) {
+  MagnetometerSample mag;
+  ProtoReader r(data);
+  ProtoField f;
+  while (r.next(f)) {
+    switch (f.number) {
+      case 1:
+        mag.timestamp = parse_timestamp(f.bytes);
+        break;
+      case 3:
+        mag.field = parse_vector3(f.bytes);
+        break;
+      case 4:
+        mag.accuracy = static_cast<int>(f.as_uint32());
+        break;
+      default:
+        break;
+    }
+  }
+  return mag;
 }
 
 std::string encode(const GpsFix& fix) {

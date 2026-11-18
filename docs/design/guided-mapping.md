@@ -347,7 +347,7 @@ dashboard (D13), then moved to the phone.
    hole classification, the clean ground mesh, feature elements, the boundary
    from a walk. Guidance offline: holes listed and shown on the dashboard's
    map. *Delivers*: the ground stops flickering; a clean ground to plan on.
-2. **Capture for guided steps.** The app records session types, the
+2. **Capture for guided steps** (first part specified in [guided-capture.md](guided-capture.md)). The app records session types, the
    magnetometer, and runs steps in one session (boundary walk, then stations);
    guidance targets and overlays on the phone, starting with the ground.
    *Delivers*: guided boundary and ground mapping in the app.

@@ -26,4 +26,14 @@ message SessionInfo {
 
   // Free-form notes (garden name, operator, ...).
   string notes = 7;
+  // What the session is for, in guided mapping (docs/design/guided-mapping.md):
+  // "boundary_walk", "ground_fill", "skyline_station", "structure_station",
+  // "canopy_station" or "relocalization". Empty for a free walk. (Since 0.2.)
+  string session_type = 8;
+  // The tracker's world frame: recordings with the same value were made in
+  // one continuous tracking session (the AR session never restarted and its
+  // tracking never reset), so their poses share one world frame and need no
+  // registration between them. Empty if unknown. Any unique string, e.g. a
+  // UUID made when the AR session starts. (Since 0.2.)
+  string tracking_frame = 9;
 }

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package vg;
+
+import "google/protobuf/timestamp.proto";
+import "vg/imu.proto";
+
+// One magnetometer sample: the magnetic field at the device, for a compass
+// heading (with gravity from the IMU or the tracker's world frame). (Since 0.2.)
+message MagneticField {
+  google.protobuf.Timestamp timestamp = 1;
+  // Frame the sample is expressed in, normally "body" (as /imu).
+  string frame_id = 2;
+  // Magnetic field in microtesla, as calibrated by the platform (hard-iron
+  // offsets removed, e.g. Android's TYPE_MAGNETIC_FIELD).
+  Vector3 field = 3;
+  // The platform's accuracy estimate: 0 unreliable, 1 low, 2 medium, 3 high
+  // (Android's SENSOR_STATUS_*); 0 if unknown.
+  uint32 accuracy = 4;
+}

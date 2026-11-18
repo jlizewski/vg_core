@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
     vg::Timestamp first = std::numeric_limits<vg::Timestamp>::max();
     std::size_t gps = 0;
     std::string device;
+    std::string kind;  // Session type and tracking frame, when set.
 
     vg::io::PlaybackOptions playback;
     playback.rate = 0.0;
@@ -114,6 +115,13 @@ int main(int argc, char** argv) {
                 if constexpr (std::is_same_v<T, vg::io::SessionInfo>) {
                   ++counts["session info"];
                   device = msg.platform + " " + msg.device_model;
+                  if (!msg.session_type.empty()) {
+                    kind += "session type " + msg.session_type;
+                  }
+                  if (!msg.tracking_frame.empty()) {
+                    kind += (kind.empty() ? "" : ", ") + std::string("tracking frame ") +
+                            msg.tracking_frame;
+                  }
                 } else if constexpr (std::is_same_v<T, vg::io::CameraCalibration>) {
                   ++counts["camera calibration"];
                 } else if constexpr (std::is_same_v<T, vg::io::StaticTransforms>) {
@@ -132,6 +140,8 @@ int main(int argc, char** argv) {
                   tracking.push_back(msg);
                 } else if constexpr (std::is_same_v<T, vg::ImuSample>) {
                   ++counts["imu samples"];
+                } else if constexpr (std::is_same_v<T, vg::MagnetometerSample>) {
+                  ++counts["magnetometer samples"];
                 } else if constexpr (std::is_same_v<T, vg::GpsFix>) {
                   ++counts["gps fixes"];
                   ++gps;
@@ -144,7 +154,8 @@ int main(int argc, char** argv) {
 
     const auto t = [&](vg::Timestamp ts) { return static_cast<double>(ts - first) * 1e-9; };
     std::cout << std::fixed << std::setprecision(1);
-    std::cout << session_path << (device.empty() ? "" : "  (" + device + ")") << "\n\nmessages\n";
+    std::cout << session_path << (device.empty() ? "" : "  (" + device + ")") << "\n"
+              << (kind.empty() ? "" : kind + "\n") << "\nmessages\n";
     for (const auto& [name, n] : counts) {
       std::cout << "  " << std::setw(20) << std::left << name << std::right << n << "\n";
     }

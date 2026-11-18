@@ -55,3 +55,4 @@ Phases, each useful on its own.
 | [Garden model](garden-model.md) | Proposed |
 | [Plant knowledge data (vg_data)](plant-data.md) | Proposed |
 | [Guided mapping: a layered site model](guided-mapping.md) | Proposed |
+| [Guided capture in vg_android (stage 2, part 1)](guided-capture.md) | Proposed |

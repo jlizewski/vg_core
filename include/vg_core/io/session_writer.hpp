@@ -26,6 +26,7 @@ class SessionWriter {
   void write(const PoseStamped& pose);
   void write(const TrackingStatus& status);
   void write(const ImuSample& imu);
+  void write(const MagnetometerSample& mag);
   void write(const GpsFix& fix);
   // Any message except SessionInfo, which the constructor writes.
   void write(const SessionMessage& message);
