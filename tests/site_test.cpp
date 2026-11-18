@@ -228,6 +228,51 @@ TEST_F(SiteTest, PlacesAWalkFromTheSameTrackingSessionInItsFrame) {
   EXPECT_EQ(log.str().find("same tracking session"), std::string::npos);
 }
 
+TEST_F(SiteTest, MakesTheBoundaryFromABoundaryWalk) {
+  // The first walk, marked a boundary walk, walked a 2 m square round the bed
+  // (and 0.5 m past its start).
+  const fs::path walk = root_ / "walks" / "recording-20261009-175006";
+  {
+    const fs::path manifest = walk / vg::package_file::kManifest;
+    std::string text = read_all(manifest);
+    const std::string empty = "\"session_type\": \"\"";
+    ASSERT_NE(text.find(empty), std::string::npos);
+    text.replace(text.find(empty), empty.size(), "\"session_type\": \"boundary_walk\"");
+    std::ofstream(manifest, std::ios::binary) << text;
+    std::ofstream path(walk / vg::package_file::kTrajectory);
+    path << "t,x,y,z\n";
+    const std::vector<Eigen::Vector2d> corners = {
+        {-0.45, -0.9}, {1.55, -0.9}, {1.55, 1.1}, {-0.45, 1.1}, {-0.45, -0.9}, {0.05, -0.9}};
+    double t = 0.0;
+    for (std::size_t c = 1; c < corners.size(); ++c) {
+      for (int s = 0; s < 20; ++s) {
+        const Eigen::Vector2d p = corners[c - 1] + (corners[c] - corners[c - 1]) * (s / 20.0);
+        path << (t += 0.1) << ',' << p.x() << ',' << p.y() << ",1.5\n";
+      }
+    }
+  }
+  vg::Site site(root_ / "site");
+  site.add(walk, {}, log_);
+  vg::BoundaryConfig config;
+  config.min_away = 1.0;
+  config.close_distance = 0.5;
+  const vg::GroundLayer layer = site.make_ground_layer(log_, {}, config);
+  ASSERT_FALSE(layer.boundary.empty()) << log_.str();
+  const fs::path dir = root_ / "site" / vg::boundary_layer_file::kDir;
+  EXPECT_TRUE(fs::is_regular_file(dir / vg::boundary_layer_file::kBoundary));
+  EXPECT_NE(read_all(dir / vg::boundary_layer_file::kWalks).find("recording-20261009-175006,1,"),
+            std::string::npos);
+  EXPECT_NE(log_.str().find("(the site's boundary)"), std::string::npos) << log_.str();
+  // Inside it the ground is as it was; beyond it, Outside.
+  std::size_t inside = 0;
+  for (std::size_t i = 0; i < layer.state.size(); ++i) {
+    inside += layer.state[i] != vg::GroundState::Outside ? 1 : 0;
+  }
+  EXPECT_GT(inside, 0u);
+  const double cell = layer.heights.cell_size;
+  EXPECT_LT(static_cast<double>(inside) * cell * cell, 7.0);  // Within ~2.5 x 2.5 m.
+}
+
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
   const fs::path root = fs::temp_directory_path() / "vg_site_model_test";
   fs::remove_all(root);

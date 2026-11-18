@@ -444,6 +444,30 @@ ParamSet bind(MappingConfig& c) {
         "Take the latest walk that measured a cell instead, as the site's current maps do "
         "(for comparison).");
 
+  p.section("boundary",
+            "The site's edge, from its boundary walks (vg site ground, layers/boundary/): the "
+            "walk's loop pushed out to the edge it followed.");
+  BoundaryConfig& bc = c.boundary;
+  p.add("boundary.close_distance", bc.close_distance,
+        "A boundary walk closes its loop coming back within this distance of its start (m)...");
+  p.add("boundary.min_away", bc.min_away,
+        "... having come at least this much nearer to it than it had been (m).");
+  p.add("boundary.overlap_length", bc.overlap_length,
+        "How much of the walk's start (m) is compared with its overlap at the end, for drift.");
+  p.add("boundary.sample_spacing", bc.sample_spacing,
+        "The walk's path is resampled every this many meters.");
+  p.add("boundary.max_push", bc.max_push,
+        "How far out from the path to look for the edge followed (a fence, wall or hedge, or "
+        "the end of the seen ground), in meters.");
+  p.add("boundary.assumed_offset", bc.assumed_offset,
+        "Where the edge is put when none is found, in meters out from the path (marked "
+        "assumed).");
+  p.add("boundary.smooth_window", bc.smooth_window,
+        "Running median of the pushes over this many points (odd): smooths gates and gaps.");
+  p.add("boundary.normal_span", bc.normal_span,
+        "Each point's outward direction is taken across this much of the path on each side (m), "
+        "so it turns gradually round a corner.");
+
   p.section("features",
             "The site's feature elements (vg site ground, layers/features/): what stands on the "
             "ground, as posts, lines and blocks, matched across walks.");

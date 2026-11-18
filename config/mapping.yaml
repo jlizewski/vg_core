@@ -352,6 +352,32 @@ ground_layer:
   # maps do (for comparison).
   latest_wins: false
 
+# The site's edge, from its boundary walks (vg site ground, layers/boundary/):
+# the walk's loop pushed out to the edge it followed.
+boundary:
+  # A boundary walk closes its loop coming back within this distance of its
+  # start (m)...
+  close_distance: 5
+  # ... having come at least this much nearer to it than it had been (m).
+  min_away: 5
+  # How much of the walk's start (m) is compared with its overlap at the end,
+  # for drift.
+  overlap_length: 3
+  # The walk's path is resampled every this many meters.
+  sample_spacing: 0.5
+  # How far out from the path to look for the edge followed (a fence, wall or
+  # hedge, or the end of the seen ground), in meters.
+  max_push: 3
+  # Where the edge is put when none is found, in meters out from the path
+  # (marked assumed).
+  assumed_offset: 1
+  # Running median of the pushes over this many points (odd): smooths gates and
+  # gaps.
+  smooth_window: 5
+  # Each point's outward direction is taken across this much of the path on each
+  # side (m), so it turns gradually round a corner.
+  normal_span: 1
+
 # The site's feature elements (vg site ground, layers/features/): what stands on
 # the ground, as posts, lines and blocks, matched across walks.
 features:

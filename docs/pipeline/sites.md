@@ -173,6 +173,32 @@ the ground as an entity of its own, from every visit's ground stage outputs
 The same evidence and edits always give byte-identical files. Packages made
 before the ground stage wrote its per-cell outputs get them first.
 
+## The boundary
+
+A **boundary walk** (a recording whose session type is `boundary_walk`) is a
+walk along the site's edge, back past its start. `vg site ground` turns each
+into a boundary ([boundary.hpp](../../include/vg_core/boundary.hpp)), in
+`layers/boundary/`:
+
+- **The loop**: where the walk comes back to its start, having come well
+  nearer to it than it had been. How far from the start that is, and how far
+  the walk's overlap at the end sits from its beginning, is the tracker's
+  drift round the loop.
+- **Pushed out to the edge**: the walker keeps a meter or two inside the
+  edge, so each point of the loop (every 0.5 m) is pushed outward across the
+  ground layer to the first covered cell (a fence, a wall, a hedge) or to
+  where the seen ground ends, within 3 m. With neither, it's put 1 m out and
+  marked *assumed*, for the user to confirm. A running median smooths gates
+  and gaps; small loops at tight corners are cut.
+- The **site's boundary** is its first boundary walk's; later ones are
+  compared with it. Ground layer cells outside it are *outside*.
+
+On the yard's two boundary walks (2026-11-18, from different corners):
+loops of 103 and 100 m, back within 20 and 8 cm of their starts; 365 and
+361 m² inside; the two outlines 8 cm apart (median), 27 cm (90%), their
+areas overlapping 96%. The edge was a structure at 41% of the points, the
+end of the seen ground at 52%, assumed at 7%.
+
 ## What sites don't do yet
 
 - Sun maps over the site's combined maps and canopy.

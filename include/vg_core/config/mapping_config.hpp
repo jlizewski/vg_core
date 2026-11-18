@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "vg_core/boundary.hpp"
 #include "vg_core/config/params.hpp"
 #include "vg_core/features.hpp"
 #include "vg_core/ground_layer.hpp"
@@ -76,6 +77,8 @@ struct MappingConfig {
   GroundLayerConfig ground_layer;
   // features: the site's feature elements (vg site ground).
   FeatureConfig features;
+  // boundary: the site's edge from its boundary walks (vg site ground).
+  BoundaryConfig boundary;
 
   // Derived stages vg replay runs after the build, in order.
   std::vector<std::string> pipeline;

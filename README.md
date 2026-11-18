@@ -475,7 +475,8 @@ be mapped over days and seasons, all on the phone: no cloud service.
 vg site add garden-site walk1/ walk2/ walk3/   # register each into the site, remake its maps
 vg site list garden-site                       # the visits, their alignment and fit
 vg site maps garden-site                       # remake current/ only
-vg site ground garden-site                     # the ground layer: every walk combined, with edits
+vg site ground garden-site                     # the ground layer: every walk combined, with edits;
+                                               # features; the boundary from boundary walks
 ```
 
 - The first walk added sets the site's frame. Each later one is registered

@@ -559,7 +559,120 @@ HeightMap layer_grid(const HeightMap& heights, const std::vector<T>& values, F v
 
 }  // namespace
 
-GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& config) const {
+void Site::make_boundary(GroundLayer& ground, const BoundaryConfig& config,
+                         std::ostream& log) const {
+  const auto dir = dir_ / boundary_layer_file::kDir;
+  struct Walk {
+    std::string id;
+    Boundary boundary;
+  };
+  std::vector<Walk> walks;
+  for (const SiteVisit& v : visits_) {
+    const auto package = package_dir(v);
+    // vg::io::session_type::kBoundaryWalk (the I/O library isn't a dependency here).
+    if (manifest_string(package, "session_type") != "boundary_walk") {
+      continue;
+    }
+    std::vector<Eigen::Vector2d> path = load_path(package);
+    for (Eigen::Vector2d& p : path) {
+      p = v.site_from_map.apply_xy(p);
+    }
+    walks.push_back({package.filename().string(), estimate_boundary(path, ground, config)});
+  }
+  if (walks.empty()) {
+    std::filesystem::remove_all(dir);  // No boundary walk (any more): no boundary.
+    return;
+  }
+  std::filesystem::create_directories(dir);
+  // The site's: the first boundary walk that closed its loop.
+  const Walk* site = nullptr;
+  for (const Walk& w : walks) {
+    if (w.boundary.loop.closed && site == nullptr) {
+      site = &w;
+    }
+  }
+
+  {
+    std::ofstream out(dir / boundary_layer_file::kWalks);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "walk,closed,loop_m,gap_m,overlap_offset_m,drift_per_100m,vertices,area_m2,"
+           "perimeter_m,structure,ground_end,assumed,site,median_apart_m,p90_apart_m,overlap\n";
+    for (const Walk& w : walks) {
+      const Boundary& b = w.boundary;
+      std::array<std::size_t, 3> by_edge{};
+      for (const BoundaryVertex& v : b.vertices) {
+        ++by_edge[static_cast<std::size_t>(v.edge)];
+      }
+      BoundaryAgreement agree;
+      const bool is_site = &w == site;
+      if (site != nullptr && !is_site && b.loop.closed) {
+        agree = compare_boundaries(site->boundary, b, 0.2);
+      }
+      out << w.id << ',' << (b.loop.closed ? 1 : 0) << ',' << b.loop.length << ',' << b.loop.gap
+          << ',' << b.loop.overlap_offset << ',' << b.loop.drift_per_100m << ','
+          << b.vertices.size() << ',' << b.area << ',' << b.perimeter << ',' << by_edge[0] << ','
+          << by_edge[1] << ',' << by_edge[2] << ',' << (is_site ? 1 : 0) << ',';
+      if (site != nullptr && !is_site && b.loop.closed) {
+        out << agree.median_distance << ',' << agree.p90_distance << ',' << agree.overlap;
+      } else {
+        out << ",,";
+      }
+      out << '\n';
+      if (b.loop.closed) {  // Each walk's own outline, to compare.
+        std::ofstream walk(dir / ("walk-" + w.id + ".csv"));
+        walk.imbue(std::locale::classic());
+        walk.precision(10);
+        walk << "x,y,edge,push_m\n";
+        for (const BoundaryVertex& v : b.vertices) {
+          walk << v.position.x() << ',' << v.position.y() << ',' << boundary_edge_name(v.edge)
+               << ',' << v.push << '\n';
+        }
+      }
+      log << "boundary: " << w.id << ": ";
+      if (!b.loop.closed) {
+        log << "didn't come back to its start (" << b.loop.length
+            << " m walked): no boundary from it" << std::endl;
+        continue;
+      }
+      log << "loop " << b.loop.length << " m, back within " << 100.0 * b.loop.gap
+          << " cm of its start (" << b.loop.drift_per_100m << "% of the loop; its overlap "
+          << 100.0 * b.loop.overlap_offset << " cm off the start); " << b.area << " m^2 inside; "
+          << "edge found at a structure " << by_edge[0] << ", where the ground ends "
+          << by_edge[1] << ", assumed " << by_edge[2] << " of " << b.vertices.size()
+          << " vertices";
+      if (is_site) {
+        log << " (the site's boundary)";
+      } else if (site != nullptr) {
+        log << "; against the site's: " << 100.0 * agree.median_distance << " cm apart (median), "
+            << 100.0 * agree.p90_distance << " cm (90%), areas overlap " << 100.0 * agree.overlap
+            << "%";
+      }
+      log << std::endl;
+    }
+  }
+  if (site == nullptr) {
+    std::filesystem::remove(dir / boundary_layer_file::kBoundary);
+    return;
+  }
+  {
+    std::ofstream out(dir / boundary_layer_file::kBoundary);
+    out.imbue(std::locale::classic());
+    out.precision(10);
+    out << "x,y,edge,push_m\n";
+    for (const BoundaryVertex& v : site->boundary.vertices) {
+      out << v.position.x() << ',' << v.position.y() << ',' << boundary_edge_name(v.edge) << ','
+          << v.push << '\n';
+    }
+  }
+  apply_boundary(ground, site->boundary);
+  for (const BoundaryVertex& v : site->boundary.vertices) {
+    ground.boundary.push_back(v.position);
+  }
+}
+
+GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& config,
+                                   const BoundaryConfig& boundary_config) const {
   const auto start = std::chrono::steady_clock::now();
   const auto dir = dir_ / ground_layer_file::kDir;
   std::filesystem::create_directories(dir);
@@ -573,7 +686,8 @@ GroundLayer Site::make_ground_layer(std::ostream& log, const GroundLayerConfig& 
     walks.push_back(std::move(walk));
   }
   const std::vector<GroundEdit> edits = load_ground_edits(dir / ground_layer_file::kEdits);
-  const GroundLayer layer = estimate_ground(walks, edits, config);
+  GroundLayer layer = estimate_ground(walks, edits, config);
+  make_boundary(layer, boundary_config, log);
 
   constexpr float kNone = std::numeric_limits<float>::quiet_NaN();
   save_height_map(layer.heights, dir / ground_layer_file::kHeights);

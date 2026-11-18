@@ -199,6 +199,9 @@ struct GroundLayer {
   std::vector<float> spread;
   // Per walk, how its ground was aligned (zero for the walk that sets the frame).
   std::vector<WalkAlignment> alignment;
+  // The site's boundary (boundary.hpp), counter-clockwise, if a boundary walk
+  // gave one: cells outside it are Outside. Empty if none.
+  std::vector<Eigen::Vector2d> boundary;
 
   std::size_t index(int x, int y) const {
     return static_cast<std::size_t>(y) * static_cast<std::size_t>(heights.width) +

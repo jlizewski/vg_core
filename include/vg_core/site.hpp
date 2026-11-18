@@ -21,6 +21,7 @@
 //                       user's edits (ground_layer.hpp)
 //     features/         posts, lines and blocks, matched across visits
 //                       (features.hpp)
+//     boundary/         the site's edge, from its boundary walks (boundary.hpp)
 //
 // The first visit defines the site frame. Each later one is registered
 // against all the visits before it, combined. Packages stay where they are;
@@ -32,6 +33,7 @@
 #include <string>
 #include <vector>
 
+#include "vg_core/boundary.hpp"
 #include "vg_core/features.hpp"
 #include "vg_core/ground_layer.hpp"
 #include "vg_core/registration.hpp"
@@ -89,9 +91,12 @@ class Site {
   void make_maps(std::ostream& log, const CanopyConfig& canopy = {}) const;
 
   // Builds the ground layer (ground_layer.hpp) from every visit's ground stage
-  // outputs and the edits in layers/ground/edits.csv, and writes it there.
+  // outputs and the edits in layers/ground/edits.csv, and writes it there;
+  // and, with boundary walks among the visits, the site's boundary
+  // (boundary.hpp, layers/boundary/), outside which the ground is Outside.
   // Throws std::runtime_error if a visit's ground outputs are missing.
-  GroundLayer make_ground_layer(std::ostream& log, const GroundLayerConfig& config = {}) const;
+  GroundLayer make_ground_layer(std::ostream& log, const GroundLayerConfig& config = {},
+                                const BoundaryConfig& boundary = {}) const;
 
   // Builds the feature elements (features.hpp) from every visit's objects,
   // matched across visits, and writes them to layers/features/.
@@ -108,6 +113,9 @@ class Site {
 
  private:
   void save() const;
+  // The site's boundary from its boundary walks, applied to ground (cells
+  // outside it Outside) and written to layers/boundary/.
+  void make_boundary(GroundLayer& ground, const BoundaryConfig& config, std::ostream& log) const;
   // Registers the package against every visit, or, given a known alignment,
   // checks how well it fits there (evaluate_alignment()).
   RegistrationResult fit(const std::filesystem::path& package, MapPackage& map,
