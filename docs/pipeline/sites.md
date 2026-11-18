@@ -257,6 +257,15 @@ fence and came back through a gate, so its boundary dipped 2 m into the yard
 there (all assumed points); one line across the gate put it back on the
 fence.
 
+In the dashboard (`vg dashboard`, the Sites tab) the site's map opens on the
+ground layer's states, with the boundary (assumed points magenta, edited
+stretches blue), feature elements, the guidance (numbered holes, spots and
+which way to face) and each edit drawn over it. Pick *not ground*, *ground* or
+*boundary* beside **Edit**, click the points on the map, and **Save edit**:
+that runs `vg site edit`, which remakes the layers. The Edits card lists each
+edit with its review and a **Delete** button, which takes the line out of its
+edits file and remakes the layers (`vg site ground`).
+
 ## What sites don't do yet
 
 - Sun maps over the site's combined maps and canopy.

@@ -96,9 +96,18 @@
         <div class="card">
           <div class="row" style="justify-content:space-between">
             <div class="row">Map <select id="layerSel"></select>
-              <label><input type="checkbox" id="showPaths" checked> walk paths</label></div>
+              <label><input type="checkbox" id="showPaths" checked> walk paths</label>
+              <label><input type="checkbox" id="showBoundary" checked> boundary</label>
+              <label><input type="checkbox" id="showFeatures" checked> features</label>
+              <label><input type="checkbox" id="showGuidance" checked> guidance</label></div>
             <div class="row">range <input id="vmin" size="6" placeholder="auto"> – <input id="vmax" size="6" placeholder="auto"></div>
           </div>
+          <div class="row" style="margin-top:8px">Edit
+            <select id="editKind"><option value="">(none)</option><option value="not_ground">not ground (area)</option>
+              <option value="ground">ground (area)</option><option value="boundary">boundary (line)</option></select>
+            <input id="editNote" size="22" placeholder="note (optional)">
+            <button class="act" id="editDone" disabled>Save edit</button><button class="plain" id="editCancel">Clear</button>
+            <span class="hint" id="editHint" style="margin:0"></span></div>
           <div id="mapwrap" style="margin-top:10px"><canvas id="map"></canvas></div>
           <div id="readout"></div>
           <div id="scale"></div>
@@ -106,6 +115,22 @@
         </div>
       </div>
       <div>
+        <div class="card">
+          <h2>Ground <span id="groundDone" class="tag"></span></h2>
+          <p class="hint">Holes nobody has seen inside the boundary, in the order to visit them, each with where to stand and
+            which way to face (white dots and blue arrows on the map, over the ground layer's states).</p>
+          <table id="targetTable"></table>
+        </div>
+        <div class="card">
+          <h2>Boundary</h2>
+          <table id="boundaryTable"></table>
+        </div>
+        <div class="card">
+          <h2>Edits</h2>
+          <p class="hint">Your corrections win over the walks. A walk recorded after an edit that disagrees with it is
+            counted here; the edit stands until you change it.</p>
+          <table id="editTable"></table>
+        </div>
         <div class="card">
           <h2>Visits</h2>
           <p class="hint">Walks lined up in the site's frame, oldest first. Fit: share of the walk's overlap within 30 cm
@@ -140,7 +165,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let state = null, grid = null, paths = [], logJob = null, logNext = 0;
+let state = null, grid = null, paths = [], overlays = null, logJob = null, logNext = 0;
 const PATH_COLORS = ["#4cc9f0", "#f72585", "#b5e48c", "#ffd166", "#06d6a0", "#ef476f", "#118ab2", "#ff9f1c", "#c77dff", "#e9ff70"];
 
 async function api(path, body) {
@@ -239,15 +264,18 @@ function renderSites() {
 
   // Layers: the site's current maps, then each walk's own.
   const ls = $("layerSel"), keepLayer = ls.value;
-  ls.innerHTML = site.maps.map((m) => `<option value="|${esc(m)}">site · ${esc(m.replace(".asc", ""))}</option>`).join("") +
+  ls.innerHTML = (site.layer_maps || []).map((m) => `<option value="@ground|${esc(m)}">ground layer · ${esc(m.replace(".asc", ""))}</option>`).join("") +
+    site.maps.map((m) => `<option value="|${esc(m)}">site · ${esc(m.replace(".asc", ""))}</option>`).join("") +
     site.walks.map((w) => w.maps.map((m) => `<option value="${esc(w.name)}|${esc(m)}">${esc(w.name)} · ${esc(m.replace(".asc", ""))}</option>`).join("")).join("");
   if ([...ls.options].some((o) => o.value === keepLayer)) ls.value = keepLayer;
+  else if ([...ls.options].some((o) => o.value === "@ground|state.asc")) ls.value = "@ground|state.asc";
   else if ([...ls.options].some((o) => o.value === "|surface.asc")) ls.value = "|surface.asc";
 }
 
 $("siteSel").onchange = () => { renderSites(); loadMap(); };
 $("layerSel").onchange = loadMap;
 $("showPaths").onchange = drawMap;
+$("showBoundary").onchange = drawMap; $("showFeatures").onchange = drawMap; $("showGuidance").onchange = drawMap;
 $("vmin").onchange = drawMap; $("vmax").onchange = drawMap;
 $("remake").onclick = () => currentSite() && startJob("/api/site/maps", { site: currentSite().name });
 
@@ -257,11 +285,71 @@ async function loadMap() {
   if (!site || !map) { grid = null; drawMap(); return; }
   try {
     const q = new URLSearchParams({ site: site.name, map, ...(walk ? { walk } : {}) });
-    [grid, paths] = await Promise.all([api(`/api/grid?${q}`), walk ? Promise.resolve([]) : api(`/api/paths?site=${encodeURIComponent(site.name)}`)]);
-    grid.name = map; grid.walk = walk;
+    const inSite = !walk || walk === "@ground";  // Drawn in the site frame.
+    const s = encodeURIComponent(site.name);
+    [grid, paths, overlays] = await Promise.all([api(`/api/grid?${q}`),
+      inSite ? api(`/api/paths?site=${s}`) : Promise.resolve([]),
+      api(`/api/overlays?site=${s}`)]);
+    grid.name = map; grid.walk = walk; grid.inSite = inSite;
   } catch (e) { grid = null; $("readout").textContent = e.message; }
+  renderLayers();
   drawMap();
 }
+
+// --- The site's layers: guidance, boundary, edits --------------------------------------------
+function renderLayers() {
+  const o = overlays || { guidance: { targets: [] }, boundary_walks: [], edits: [] };
+  const g = o.guidance;
+  $("groundDone").textContent = g.done == null ? "no ground layer yet" : g.done ? "done" : `not done: ${g.targets.length} holes, ${(g.unknown_m2 ?? 0).toFixed(1)} m²`;
+  $("groundDone").className = "tag " + (g.done ? "good" : g.done == null ? "" : "warn");
+  $("targetTable").innerHTML = g.targets.length ? `<tr><th>#</th><th>Hole</th><th>Look from</th><th>In view</th></tr>` +
+    g.targets.map((t) => `<tr><td>${t.order}</td><td>${t.area_m2.toFixed(1)} m² at ${t.x.toFixed(1)}, ${t.y.toFixed(1)}</td>
+      <td>${t.spots.map((p) => `${p.x.toFixed(1)}, ${p.y.toFixed(1)} facing ${Math.round(p.heading_deg)}°`).join("<br>") || '<span class="empty">no spot sees it</span>'}</td>
+      <td class="num">${pct(t.seen)}</td></tr>`).join("")
+    : `<tr><td class="empty">${g.done ? "Nothing left to look at." : "Run vg site ground (Remake maps) to plan it."}</td></tr>`;
+  $("boundaryTable").innerHTML = o.boundary_walks.length ? `<tr><th>Boundary walk</th><th>Loop</th><th>Back within</th><th>Area</th><th>Agrees</th></tr>` +
+    o.boundary_walks.map((w) => `<tr><td>${esc(w.walk)}${w.site ? ' <span class="tag">site\'s</span>' : ""}</td>
+      <td class="num">${w.closed ? w.loop_m.toFixed(0) + " m" : "not closed"}</td><td class="num">${w.closed ? (100 * w.gap_m).toFixed(0) + " cm" : ""}</td>
+      <td class="num">${w.closed ? w.area_m2.toFixed(0) + " m²" : ""}</td>
+      <td class="num">${w.median_apart_m != null ? (100 * w.median_apart_m).toFixed(0) + " cm, " + pct(w.overlap) : ""}</td></tr>`).join("")
+    : `<tr><td class="empty">No boundary walk yet.</td></tr>`;
+  $("editTable").innerHTML = o.edits.length ? `<tr><th>Edit</th><th>When</th><th>Review</th><th></th></tr>` +
+    o.edits.map((e) => `<tr><td>${esc(e.id)} · ${esc(e.kind.replace("_", " "))}<br><span class="hint">${esc(e.note)}</span></td>
+      <td>${esc(e.time.replace("T", " ").replace("Z", ""))}</td>
+      <td>${e.review ? (e.review.disagreeing ? `<span class="warn">${e.review.disagreeing} of ${e.review.cells} cells disagree</span><br><span class="hint">${e.review.walks.map(esc).join(", ")}</span>` : `${e.review.cells} cells, no disagreement`) : ""}</td>
+      <td><button class="plain" data-del="${esc(e.id)}">Delete</button></td></tr>`).join("")
+    : `<tr><td class="empty">No edits.</td></tr>`;
+  document.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+    if (confirm(`Delete edit ${b.dataset.del}?`)) startJob("/api/edit/delete", { site: currentSite().name, id: b.dataset.del });
+  });
+}
+
+// --- Editing on the map ------------------------------------------------------------------------
+let draft = [];  // Points of the edit being drawn, site frame.
+const EDIT_HINT = { ground: "Click round the area that is ground, then Save.", not_ground: "Click round the area that isn't ground (something stands there), then Save.",
+                    boundary: "Click from a point on the boundary, along where it should run, to another point on it, then Save." };
+function updateEditBar() {
+  const kind = $("editKind").value;
+  const need = kind === "boundary" ? 2 : 3;
+  $("editDone").disabled = !kind || draft.length < need;
+  $("editHint").textContent = kind ? `${EDIT_HINT[kind]} (${draft.length} points)` : "";
+  $("map").style.cursor = kind ? "copy" : "crosshair";
+}
+$("editKind").onchange = () => { draft = []; updateEditBar(); drawMap(); };
+$("editCancel").onclick = () => { draft = []; updateEditBar(); drawMap(); };
+$("editDone").onclick = async () => {
+  const kind = $("editKind").value;
+  await startJob("/api/edit", { site: currentSite().name, kind, points: draft, note: $("editNote").value });
+  draft = []; $("editNote").value = ""; $("editKind").value = ""; updateEditBar();
+};
+$("map").onclick = (e) => {
+  if (!grid || !grid.inSite || !$("editKind").value) return;
+  const r = e.target.getBoundingClientRect(), s = e.target.width / r.width, scale = +e.target.dataset.scale;
+  const px = (e.clientX - r.left) * s / scale, py = (e.clientY - r.top) * s / scale;
+  draft.push([+(grid.xll + px * grid.cell).toFixed(3), +(grid.yll + (grid.nrows - py) * grid.cell).toFixed(3)]);
+  updateEditBar();
+  drawMap();
+};
 
 function paletteColor(t) {
   const stops = state.palette;
@@ -284,7 +372,9 @@ function drawMap() {
   const canvas = $("map");
   if (!grid || !state) { canvas.width = 1; canvas.height = 1; $("legend").innerHTML = ""; $("scale").style.background = "none"; return; }
   const kind = grid.name === "semantic.asc" ? "classes" : grid.name === "visit.asc" ? "visits"
-             : grid.name === "changes.asc" ? "diverging" : "heat";
+             : grid.name === "changes.asc" ? "diverging"
+             : grid.name === "state.asc" || grid.name === "ground_state.asc" ? "states"
+             : grid.name === "provenance.asc" ? "provenance" : "heat";
   let lo = parseFloat($("vmin").value), hi = parseFloat($("vmax").value);
   if (kind === "diverging") { const m = isNaN(hi) ? 0.5 : hi; lo = -m; hi = m; }
   if (isNaN(lo)) lo = grid.min; if (isNaN(hi)) hi = grid.max;
@@ -298,6 +388,8 @@ function drawMap() {
     if (v == null) continue;
     let c;
     if (kind === "classes") c = (state.classes[v] || state.classes[0]).color;
+    else if (kind === "states") c = (GROUND_STATES[v] || GROUND_STATES[0]).color;
+    else if (kind === "provenance") c = (PROVENANCE[v] || PROVENANCE[0]).color;
     else if (kind === "visits") c = hexRgb(PATH_COLORS[(v - 1) % PATH_COLORS.length]);
     else if (kind === "diverging") c = divergingColor(v / (hi || 1));
     else c = paletteColor((v - lo) / span);
@@ -308,7 +400,7 @@ function drawMap() {
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(off, 0, 0, W * scale, H * scale);
 
-  if ($("showPaths").checked && !grid.walk) {
+  if ($("showPaths").checked && grid.inSite) {
     const site = currentSite();
     const index = Object.fromEntries(site.visits.map((v, i) => [v.walk, i]));
     ctx.lineWidth = Math.max(1.5, scale / 2);
@@ -323,9 +415,14 @@ function drawMap() {
     }
   }
   canvas.dataset.scale = scale;
+  if (grid.inSite) drawOverlays(ctx, scale, H);
 
   // Legend.
-  if (kind === "classes") {
+  if (kind === "states" || kind === "provenance") {
+    const keys = kind === "states" ? GROUND_STATES : PROVENANCE;
+    $("scale").style.background = "none";
+    $("legend").innerHTML = Object.values(keys).filter((k) => k.name).map((k) => `<span><i style="background:rgb(${k.color})"></i>${esc(k.name)}</span>`).join("");
+  } else if (kind === "classes") {
     $("scale").style.background = "none";
     $("legend").innerHTML = state.classes.slice(1).map((c) => `<span><i style="background:rgb(${c.color})"></i>${esc(c.name)}</span>`).join("");
   } else if (kind === "visits") {
@@ -335,10 +432,80 @@ function drawMap() {
     const stops = kind === "diverging" ? [[0, divergingColor(-1)], [0.5, divergingColor(0)], [1, divergingColor(1)]] : state.palette;
     $("scale").style.background = `linear-gradient(90deg, ${stops.map(([t, c]) => `rgb(${c}) ${t * 100}%`).join(",")})`;
     $("legend").innerHTML = `<span>${lo.toFixed(2)}</span><span style="margin-left:auto">${hi.toFixed(2)}</span>` +
-      (!grid.walk && $("showPaths").checked ? currentSite().visits.map((v, i) => `<span><i style="background:${PATH_COLORS[i % PATH_COLORS.length]}"></i>${esc(v.walk)}</span>`).join("") : "");
+      (grid.inSite && $("showPaths").checked ? currentSite().visits.map((v, i) => `<span><i style="background:${PATH_COLORS[i % PATH_COLORS.length]}"></i>${esc(v.walk)}</span>`).join("") : "");
   }
 }
 const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const GROUND_STATES = { 0: { color: [200, 200, 200] }, 1: { name: "measured", color: [120, 100, 75] }, 2: { name: "filled", color: [160, 130, 190] },
+                        3: { name: "covered", color: [215, 125, 50] }, 4: { name: "unknown: go and look", color: [250, 225, 60] } };
+const PROVENANCE = { 0: { color: [200, 200, 200] }, 1: { name: "measured", color: [120, 100, 75] }, 2: { name: "inferred", color: [170, 160, 200] },
+                     3: { name: "edited", color: [40, 120, 230] }, 4: { name: "confirmed", color: [60, 170, 90] } };
+
+// Boundary, features, guidance and the edit being drawn, in the site frame.
+function drawOverlays(ctx, scale, H) {
+  const o = overlays;
+  const at = (x, y) => [(x - grid.xll) / grid.cell * scale, (H - (y - grid.yll) / grid.cell) * scale];
+  const px = scale / grid.cell;  // Pixels per meter.
+  if (o && $("showFeatures").checked) {
+    for (const f of o.features) {
+      if (f.x == null) continue;
+      const [cx, cy] = at(f.x, f.y);
+      ctx.globalAlpha = f.status === "retired" ? 0.35 : 1;
+      ctx.strokeStyle = "#111"; ctx.fillStyle = f.seen > 1 ? "#00d0ff" : "#ffffff"; ctx.lineWidth = 1.5;
+      if (f.kind === "post") {
+        ctx.beginPath(); ctx.arc(cx, cy, Math.max(3, scale), 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      } else {
+        const a = -f.axis_deg * Math.PI / 180;
+        ctx.save(); ctx.translate(cx, cy); ctx.rotate(a);
+        ctx.strokeStyle = f.seen > 1 ? "#00d0ff" : "#ffffff"; ctx.lineWidth = f.kind === "line" ? 3 : 2;
+        ctx.strokeRect(-f.length / 2 * px, -f.width / 2 * px, f.length * px, f.width * px);
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  if (o && $("showBoundary").checked && o.boundary.length > 2) {
+    ctx.strokeStyle = "#ffffff"; ctx.lineWidth = Math.max(2, scale / 2);
+    ctx.beginPath();
+    o.boundary.forEach((v, k) => { const [x, y] = at(v.x, v.y); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.closePath(); ctx.stroke();
+    for (const v of o.boundary) {
+      if (v.edge !== "assumed" && v.edge !== "edited") continue;
+      const [x, y] = at(v.x, v.y);
+      ctx.fillStyle = v.edge === "assumed" ? "#ff40ff" : "#2878e6";
+      ctx.beginPath(); ctx.arc(x, y, Math.max(2.5, scale * 0.7), 0, 2 * Math.PI); ctx.fill();
+    }
+  }
+  if (o && $("showGuidance").checked) {
+    for (const t of o.guidance.targets) {
+      const [cx, cy] = at(t.x, t.y);
+      for (const s of t.spots) {
+        const [sx, sy] = at(s.x, s.y);
+        ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(cx, cy); ctx.stroke();
+        const a = s.heading_deg * Math.PI / 180, len = Math.max(18, 1.2 * px);
+        ctx.strokeStyle = "#1e5aff"; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + len * Math.cos(a), sy - len * Math.sin(a)); ctx.stroke();
+        ctx.fillStyle = "#fff"; ctx.strokeStyle = "#000"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(sx, sy, 6, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      }
+      ctx.fillStyle = "#fff"; ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(cx, cy, 11, 0, 2 * Math.PI); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = "#000"; ctx.font = "bold 13px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(t.order), cx, cy + 1);
+    }
+  }
+  if (draft.length) {
+    const kind = $("editKind").value;
+    ctx.strokeStyle = kind === "ground" ? "#2fbf5f" : kind === "not_ground" ? "#e0403a" : "#2878e6";
+    ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 3; ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    draft.forEach(([x, y], k) => { const [a, b] = at(x, y); k ? ctx.lineTo(a, b) : ctx.moveTo(a, b); });
+    if (kind !== "boundary" && draft.length > 2) ctx.closePath();
+    ctx.stroke(); ctx.setLineDash([]);
+    for (const [x, y] of draft) { const [a, b] = at(x, y); ctx.beginPath(); ctx.arc(a, b, 4, 0, 2 * Math.PI); ctx.fill(); }
+  }
+}
 
 $("map").onmousemove = (e) => {
   if (!grid) return;
@@ -350,6 +517,8 @@ $("map").onmousemove = (e) => {
   let text = v == null ? "no data" : v.toFixed(3);
   if (v != null && grid.name === "semantic.asc") text = state.classes[v]?.name ?? v;
   if (v != null && grid.name === "visit.asc") text = `${v} ${currentSite().visits[v - 1]?.walk ?? ""}`;
+  if (v != null && (grid.name === "state.asc" || grid.name === "ground_state.asc")) text = GROUND_STATES[v]?.name ?? v;
+  if (v != null && grid.name === "provenance.asc") text = PROVENANCE[v]?.name ?? v;
   $("readout").textContent = `x ${x.toFixed(2)} m, y ${y.toFixed(2)} m: ${text}`;
 };
 

@@ -127,6 +127,101 @@ def test_actions_check_their_inputs(tmp_path: Path):
     assert add.args[:2] == ["site", "add"] and add.args[-1] == "--force"
 
 
+def make_layers(ws: dashboard.Workspace) -> Path:
+    layers = ws.site("backyard") / "layers"
+    for name in ("ground", "boundary", "features", "guidance"):
+        (layers / name).mkdir(parents=True)
+    (layers / "ground" / "state.asc").write_text(GRID)
+    (layers / "ground" / "edits.csv").write_text(
+        "id,time,kind,points,note\n"
+        "edit-1,2026-11-18T18:00:00Z,not_ground,1 1;2 1;2 2,leaves, in a pile\n"
+        "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1\n")
+    (layers / "ground" / "edit_reviews.csv").write_text(
+        "id,cells,disagreeing_cells,walks\nedit-1,12,4,fill3;fill4\n")
+    (layers / "boundary" / "edits.csv").write_text(
+        "id,time,kind,points,note\nedit-2,2026-11-18T18:01:00Z,boundary,0 0;3 0,gate\n")
+    (layers / "boundary" / "boundary.csv").write_text(
+        "x,y,edge\n0,0,structure\n4,0,assumed\n4,3,ground_end\n")
+    (layers / "boundary" / "walks.csv").write_text(
+        "walk,closed,site,loop_m,gap_m,area_m2,median_apart_m,overlap,structure,ground_end,assumed\n"
+        "b1,1,1,14.0,0.2,6.0,,,1,1,1\n")
+    (layers / "features" / "elements.csv").write_text(
+        "id,kind,class,status,seen,center_x,center_y,length_m,width_m,axis_deg,height_m\n"
+        "1,post,structure,matched,3,1.5,2.5,0.1,0.1,0,1.2\n")
+    (layers / "guidance" / "targets.csv").write_text(
+        "target,order,cells,area_m2,seen,center_x,center_y,spot,spot_x,spot_y,heading_deg,"
+        "distance_m,sees\n"
+        "1,2,40,2.5,1.0,3,3,1,1,1,45,2.0,1.0\n"
+        "2,1,8,0.5,0.0,-3,-3,,,,,,\n")
+    (layers / "guidance" / "guidance.json").write_text('{"done": false, "unknown_m2": 3.0}')
+    return layers
+
+
+def test_site_overlays(tmp_path: Path):
+    ws = make_workspace(tmp_path)
+    make_layers(ws)
+    o = dashboard.site_overlays(ws, "backyard")
+    assert o["boundary"][1] == {"x": 4.0, "y": 0.0, "edge": "assumed"}
+    [walk] = o["boundary_walks"]
+    assert walk["site"] and walk["closed"] and walk["median_apart_m"] is None
+    assert walk["edges"] == {"structure": 1, "ground_end": 1, "assumed": 1}
+    [post] = o["features"]
+    assert post["kind"] == "post" and post["seen"] == 3 and (post["x"], post["y"]) == (1.5, 2.5)
+    g = o["guidance"]
+    assert g["done"] is False and g["unknown_m2"] == 3.0
+    assert [t["rank"] for t in g["targets"]] == [2, 1]  # In visiting order.
+    assert g["targets"][0]["spots"] == []
+    assert g["targets"][1]["spots"][0]["heading_deg"] == 45.0
+    edits = {e["id"]: e for e in o["edits"]}
+    assert edits["edit-1"]["note"] == "leaves, in a pile"  # Commas kept in notes.
+    assert edits["edit-1"]["points"] == [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0]]
+    assert edits["edit-1"]["review"] == {"cells": 12, "disagreeing": 4, "walks": ["fill3", "fill4"]}
+    assert edits["edit-3"]["note"] == "" and edits["edit-3"]["review"] is None
+    assert edits["edit-2"]["layer"] == "boundary" and edits["edit-2"]["kind"] == "boundary"
+
+
+def test_site_overlays_without_layers(tmp_path: Path):
+    ws = make_workspace(tmp_path)
+    o = dashboard.site_overlays(ws, "backyard")
+    assert o["boundary"] == [] and o["features"] == [] and o["edits"] == []
+    assert o["guidance"] == {"done": None, "unknown_m2": None, "targets": []}
+
+
+def test_ground_layer_maps(tmp_path: Path):
+    ws = make_workspace(tmp_path)
+    make_layers(ws)
+    [site] = dashboard.list_sites(ws)
+    assert site["layer_maps"] == ["state.asc"]
+    g = dashboard.grid_json(ws, "backyard", "state.asc", "@ground")
+    assert g["values"] == [1.0, None, 3.0, 4.0]
+
+
+def test_site_edits(tmp_path: Path):
+    ws = make_workspace(tmp_path)
+    layers = make_layers(ws)
+    jobs = dashboard.Jobs(tmp_path, command=[sys.executable, "-c", "pass"])
+    job = dashboard.start_site_edit(ws, jobs, "backyard", "not_ground",
+                                    [[1, 2], [3, 4.5], [5, 6]], "  chairs\n stacked ")
+    assert job.args[:2] == ["site", "edit"] and job.args[2].endswith("backyard")
+    assert job.args[3:] == ["not_ground", "1.000 2.000;3.000 4.500;5.000 6.000", "chairs stacked"]
+    line = dashboard.start_site_edit(ws, jobs, "backyard", "boundary", [[0, 0], [1, 1]], "")
+    assert len(line.args) == 5  # No note.
+    for kind, points in [("fence", [[0, 0], [1, 1], [2, 2]]), ("ground", [[0, 0], [1, 1]]),
+                         ("ground", [[0, 0], [1, 1], [float("nan"), 2]])]:
+        with pytest.raises(ValueError):
+            dashboard.start_site_edit(ws, jobs, "backyard", kind, points, "")
+
+    remake = dashboard.delete_site_edit(ws, jobs, "backyard", "edit-1")
+    assert remake.args[:2] == ["site", "ground"]
+    assert (layers / "ground" / "edits.csv").read_text().splitlines() == [
+        "id,time,kind,points,note", "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1"]
+    dashboard.delete_site_edit(ws, jobs, "backyard", "edit-2")
+    assert (layers / "boundary" / "edits.csv").read_text() == "id,time,kind,points,note\n"
+    for bad in ["edit-1", "../x", "a,b", ""]:
+        with pytest.raises(ValueError):
+            dashboard.delete_site_edit(ws, jobs, "backyard", bad)
+
+
 def test_serves_the_page_and_api(tmp_path: Path):
     ws = make_workspace(tmp_path)
     jobs = dashboard.Jobs(tmp_path, command=[sys.executable, "-c", "print('done')"])

@@ -528,6 +528,11 @@ it: recordings -> walks -> a site -> its maps.
 - **Sites**: the visits lined up in the site's frame with their fit, walks
   not yet added (add them, long walks first), and any map of the site or of
   one walk, with every walk's path over it and the value under the cursor.
+- **Layers**: the site's ground layer (measured, filled, covered, unknown),
+  its boundary, feature elements and ground-fill guidance over the map, with
+  the user's edits: click an area that isn't ground (or is), or a line where
+  the boundary runs, and save it; delete one from the Edits card (see
+  [docs/pipeline/sites.md](docs/pipeline/sites.md#edits)).
 - **Jobs**: replays and site builds run one at a time, with their logs.
 - **Foxglove**: each walk's button opens it in Foxglove over the site's 3D
   model (see below), making the file first if needed.

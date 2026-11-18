@@ -6,8 +6,10 @@ walks (map packages) -> sites -> maps, as the app will run it on the phone.
 Serves a page on http://127.0.0.1:PORT (this computer only) that lists the
 recordings and sites, runs vg replay / vg site / vg mcap stats as jobs (one
 at a time, with their logs), shows any map of a site or walk with the
-walks' paths over it, and opens a walk in Foxglove over the site's 3D model
-(vg foxglove; see vg_tools/foxglove.py).
+walks' paths over it, opens a walk in Foxglove over the site's 3D model
+(vg foxglove; see vg_tools/foxglove.py), and shows a site's layers (ground
+states, boundary, features, ground-fill guidance) with the user's edits,
+which can be made and deleted on the map (vg site edit).
 
 A site is a directory under --sites: walks/<name>/ holds its walks (map
 packages, made from recordings by vg replay), and vg site keeps site.csv and
@@ -171,6 +173,7 @@ def list_sites(ws: Workspace) -> list[dict]:
             "walks": walks,
             "visits": read_visits(d),
             "maps": sorted(p.name for p in (d / "current").glob("*.asc")),
+            "layer_maps": sorted(p.name for p in (d / "layers" / "ground").glob("*.asc")),
         })
     return sites
 
@@ -199,9 +202,12 @@ def site_paths(ws: Workspace, site_name: str) -> list[dict]:
 
 
 def grid_json(ws: Workspace, site_name: str, layer: str, walk: str | None) -> dict:
-    """A map of a site (current/) or of one of its walks, as plain numbers."""
+    """A map of a site (current/), of its ground layer (walk "@ground":
+    layers/ground/), or of one of its walks, as plain numbers."""
     base = ws.site(site_name)
-    if walk:
+    if walk == "@ground":
+        base = base / "layers" / "ground"
+    elif walk:
         if not valid_name(walk):
             raise ValueError(f"bad walk name {walk!r}")
         base = base / "walks" / walk
@@ -222,6 +228,139 @@ def grid_json(ws: Workspace, site_name: str, layer: str, walk: str | None) -> di
         # Top row first, as in the file; null where there's no data.
         "values": [None if v is None else round(v, 3) for row in grid.rows for v in row],
     }
+
+
+def _csv_rows(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with open(path, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _floats(row: dict, *keys: str) -> list[float | None]:
+    out = []
+    for k in keys:
+        try:
+            out.append(round(float(row[k]), 3))
+        except (KeyError, TypeError, ValueError):
+            out.append(None)
+    return out
+
+
+def _read_edits(path: Path) -> list[dict]:
+    """A layer's edits.csv: id, time, kind, points, note (the rest of the line)."""
+    if not path.is_file():
+        return []
+    edits = []
+    for line in path.read_text().splitlines()[1:]:
+        parts = line.split(",", 4)
+        if len(parts) < 4:
+            continue
+        points = []
+        for vertex in parts[3].split(";"):
+            xy = vertex.split()
+            if len(xy) == 2:
+                points.append([float(xy[0]), float(xy[1])])
+        edits.append({"id": parts[0], "time": parts[1], "kind": parts[2], "points": points,
+                      "note": parts[4] if len(parts) > 4 else ""})
+    return edits
+
+
+def site_overlays(ws: Workspace, site_name: str) -> dict:
+    """What a site's map shows over it, in the site frame: the boundary (and
+    each boundary walk's loop), feature elements, ground-fill guidance, and
+    the user's edits with their reviews."""
+    site = ws.site(site_name)
+    layers = site / "layers"
+    boundary = [{"x": x, "y": y, "edge": r.get("edge", "")}
+                for r in _csv_rows(layers / "boundary" / "boundary.csv")
+                for x, y in [_floats(r, "x", "y")]]
+    boundary_walks = [{
+        "walk": r["walk"], "closed": r["closed"] == "1", "site": r["site"] == "1",
+        "loop_m": _floats(r, "loop_m")[0], "gap_m": _floats(r, "gap_m")[0],
+        "area_m2": _floats(r, "area_m2")[0], "median_apart_m": _floats(r, "median_apart_m")[0],
+        "overlap": _floats(r, "overlap")[0],
+        "edges": {k: int(r.get(k) or 0) for k in ("structure", "ground_end", "assumed")},
+    } for r in _csv_rows(layers / "boundary" / "walks.csv")]
+    features = [{
+        "id": r["id"], "kind": r["kind"], "class": r["class"], "status": r["status"],
+        "seen": int(r["seen"]),
+        **dict(zip(("x", "y", "length", "width", "axis_deg", "height"),
+                   _floats(r, "center_x", "center_y", "length_m", "width_m", "axis_deg",
+                           "height_m"), strict=True)),
+    } for r in _csv_rows(layers / "features" / "elements.csv")]
+    targets: dict[str, dict] = {}
+    for r in _csv_rows(layers / "guidance" / "targets.csv"):
+        t = targets.setdefault(r["target"], {
+            "rank": int(r["target"]), "order": int(r["order"]),
+            "area_m2": _floats(r, "area_m2")[0], "seen": _floats(r, "seen")[0],
+            "x": _floats(r, "center_x")[0], "y": _floats(r, "center_y")[0], "spots": []})
+        if r.get("spot_x"):
+            x, y, heading, distance, sees = _floats(r, "spot_x", "spot_y", "heading_deg",
+                                                    "distance_m", "sees")
+            t["spots"].append({"x": x, "y": y, "heading_deg": heading, "distance_m": distance,
+                               "sees": sees})
+    summary = {}
+    if (layers / "guidance" / "guidance.json").is_file():
+        try:
+            summary = json.loads((layers / "guidance" / "guidance.json").read_text())
+        except ValueError:
+            summary = {}
+    reviews = {r["id"]: {"cells": int(r["cells"]), "disagreeing": int(r["disagreeing_cells"]),
+                         "walks": [w for w in r["walks"].split(";") if w]}
+               for r in _csv_rows(layers / "ground" / "edit_reviews.csv")}
+    edits = []
+    for layer in ("ground", "boundary"):
+        for e in _read_edits(layers / layer / "edits.csv"):
+            edits.append({**e, "layer": layer, "review": reviews.get(e["id"])})
+    return {
+        "boundary": boundary,
+        "boundary_walks": boundary_walks,
+        "features": features,
+        "guidance": {"done": summary.get("done"), "unknown_m2": summary.get("unknown_m2"),
+                     "targets": sorted(targets.values(), key=lambda t: t["order"])},
+        "edits": edits,
+    }
+
+
+EDIT_KINDS = {"ground": 3, "not_ground": 3, "boundary": 2}
+
+
+def start_site_edit(ws: Workspace, jobs: Jobs, site: str, kind: str, points: list,
+                    note: str) -> Job:
+    """vg site edit: adds an area (ground, not_ground) or a boundary line,
+    points [[x, y], ...] in the site frame, then remakes the layers."""
+    base = ws.site(site)
+    if kind not in EDIT_KINDS:
+        raise ValueError(f"bad edit kind {kind!r}")
+    pts = [[float(x), float(y)] for x, y in points]
+    if len(pts) < EDIT_KINDS[kind]:
+        raise ValueError(f"a {kind} edit needs at least {EDIT_KINDS[kind]} points")
+    if not all(math.isfinite(v) for p in pts for v in p):
+        raise ValueError("bad point")
+    note = " ".join(str(note).split())  # One line.
+    text = ";".join(f"{x:.3f} {y:.3f}" for x, y in pts)
+    args = ["site", "edit", str(base), kind, text]
+    if note:
+        args.append(note)
+    return jobs.submit(f"edit {site}: {kind} ({len(pts)} points)", args)
+
+
+def delete_site_edit(ws: Workspace, jobs: Jobs, site: str, edit_id: str) -> Job:
+    """Takes an edit out of its layer's edits.csv, then remakes the layers."""
+    base = ws.site(site)
+    if not re.match(r"^[A-Za-z0-9._-]{1,40}$", edit_id):
+        raise ValueError(f"bad edit id {edit_id!r}")
+    for layer in ("ground", "boundary"):
+        path = base / "layers" / layer / "edits.csv"
+        if not path.is_file():
+            continue
+        lines = path.read_text().splitlines()
+        kept = [line for line in lines[1:] if line.split(",", 1)[0] != edit_id]
+        if len(kept) < len(lines) - 1:
+            path.write_text("\n".join([lines[0], *kept]) + "\n")
+            return jobs.submit(f"delete edit {edit_id} from {site}", ["site", "ground", str(base)])
+    raise ValueError(f"no edit {edit_id!r} in {site}")
 
 
 # --- Jobs -----------------------------------------------------------------------------------
@@ -440,6 +579,8 @@ def make_handler(ws: Workspace, jobs: Jobs):
                                     "next": len(job.lines)})
                 elif url.path == "/api/grid":
                     self._json(grid_json(ws, q["site"], q["map"], q.get("walk")))
+                elif url.path == "/api/overlays":
+                    self._json(site_overlays(ws, q["site"]))
                 elif url.path == "/api/paths":
                     self._json(site_paths(ws, q["site"]))
                 else:
@@ -461,6 +602,11 @@ def make_handler(ws: Workspace, jobs: Jobs):
                     job = start_site_maps(ws, jobs, body["site"])
                 elif url.path == "/api/stats":
                     job = start_stats(ws, jobs, body["recording"])
+                elif url.path == "/api/edit":
+                    job = start_site_edit(ws, jobs, body["site"], body["kind"],
+                                          list(body["points"]), body.get("note", ""))
+                elif url.path == "/api/edit/delete":
+                    job = delete_site_edit(ws, jobs, body["site"], body["id"])
                 elif url.path == "/api/foxglove":
                     self._json(open_in_foxglove(ws, jobs, body["site"], body["walk"]))
                     return
