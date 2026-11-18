@@ -507,12 +507,21 @@ vg site edit garden-site boundary "x y;x y" gate  # a correction (also ground / 
 - `site.csv` lists the visits, oldest first (by the date in the recording's
   name), with each walk's transform into the site frame and its fit.
   `current/` holds the site's maps in its frame, each cell from the latest
-  walk that saw it (`surface`, `ground`, `terrain`, `features`, `semantic`),
-  plus `visit.asc` (which walk each cell came from), `changes.asc` (the
+  walk that saw it (`surface`, `terrain`, `features`, `semantic`), plus
+  `visit.asc` (which walk each cell came from) and `changes.asc` (the
   surface's change since the walk before: growth, and misalignment along
-  walls) and `model.glb`, the site in 3D: the surface colored by class with
-  the canopy's underside see-through over it (`Site::model()`; opens in
-  Windows' 3D Viewer, Blender or a browser).
+  walls).
+- `layers/` holds the site's layers, remade with its maps: the **ground**
+  combined over every walk (aligned in height first, then a robust median),
+  each cell measured, filled, covered or unknown; the **boundary** from
+  boundary walks; **feature elements** (posts, fences, beds) matched across
+  walks; and **guidance**, where to stand to see the unknown holes. Edits
+  (`vg site edit`, or on the dashboard's map) win over the walks. From them,
+  `current/ground.asc`, `ground_state.asc` and `model.glb`, the site in 3D:
+  the clean ground by state, what stands on it, the canopy's underside
+  see-through over it and the boundary (`Site::model()`; opens in Windows'
+  3D Viewer, Blender or a browser). See
+  [docs/pipeline/sites.md](docs/pipeline/sites.md#the-ground-layer).
 - Settings: the `site` section of [config/mapping.yaml](config/mapping.yaml).
   Packages missing their terrain maps get them first.
 

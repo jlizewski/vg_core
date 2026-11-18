@@ -96,7 +96,9 @@ flowchart LR
    and [pipeline/sun-and-sky.md](pipeline/sun-and-sky.md).
 4. **Register.** Each walk's package lines up with the walks before it in one
    site frame, so the site keeps the latest view of every spot and the change
-   since the last. See [pipeline/sites.md](pipeline/sites.md).
+   since the last, and its layers combine every walk: the ground, the
+   boundary, feature elements, and where to look next, with the user's edits
+   winning. See [pipeline/sites.md](pipeline/sites.md).
 5. **Model the garden** (designed, not built). Beds, plantings and
    observations live in the site frame and are summarized from its maps. See
    [design/garden-model.md](design/garden-model.md).

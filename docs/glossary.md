@@ -147,6 +147,30 @@ that saw it (`current/`).
 **Changes.** How much the surface rose or fell in each cell since the
 previous visit that saw it: growth, mostly.
 
+**Layer.** One part of a site kept as its own thing, with its evidence, an
+estimator, uncertainty and guidance (`layers/`): the ground, the boundary,
+feature elements; later structures, skyline and canopy. See
+[design/guided-mapping.md](design/guided-mapping.md).
+
+**Ground layer, cell state.** The ground combined over every walk. Each cell
+is *measured* (seen as ground), *filled* (a small hole or under something
+low), *covered* (under something standing), *unknown* (a hole to go and look
+at) or *outside* (beyond the boundary).
+
+**Boundary walk.** A recording made walking the site's edge, back past the
+start; it gives the site's boundary.
+
+**Feature element.** A post, a line (a fence, a wall) or a block (a bed, a
+bin) found at waist height and matched across walks: what relocalization
+matches and a person recognizes.
+
+**Guidance.** Where to stand, and which way to face, to see what's still
+unknown; and whether a step is done.
+
+**Edit.** The user's correction to a layer (an area that is or isn't ground,
+where the boundary runs). Edits win over what walks measure; walks that
+disagree are counted, not obeyed.
+
 ## The garden (designed, not built)
 
 See [design/garden-model.md](design/garden-model.md).

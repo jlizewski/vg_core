@@ -1,6 +1,6 @@
 # Guided mapping: a layered site model
 
-Status: Proposed · Updated: 2026-11-16
+Status: Proposed; stage 1 built ([pipeline/sites.md](../pipeline/sites.md#the-ground-layer)) · Updated: 2026-11-18
 
 ## Summary
 
@@ -347,6 +347,8 @@ dashboard (D13), then moved to the phone.
    hole classification, the clean ground mesh, feature elements, the boundary
    from a walk. Guidance offline: holes listed and shown on the dashboard's
    map. *Delivers*: the ground stops flickering; a clean ground to plan on.
+   **Built** (2026-11-18): `vg site ground`, the dashboard's layers and edits;
+   see [pipeline/sites.md](../pipeline/sites.md#the-ground-layer).
 2. **Capture for guided steps** (first part specified in [guided-capture.md](guided-capture.md)). The app records session types, the
    magnetometer, and runs steps in one session (boundary walk, then stations);
    guidance targets and overlays on the phone, starting with the ground.

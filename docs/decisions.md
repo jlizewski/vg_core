@@ -188,7 +188,7 @@ evidence, and guidance from what's unknown makes results consistent. See
 
 ## D15. The ground is the site's anchor, combined over every walk
 
-**Proposed** · 2026-11-16 · Replaces "latest walk wins" for the ground
+**Decided** · 2026-11-18 (proposed 2026-11-16) · Replaces "latest walk wins" for the ground · Built: [pipeline/sites.md](pipeline/sites.md#the-ground-layer)
 
 The ground is a layer of its own: a smooth surface with a state per cell
 (measured, filled, covered, unknown, outside), combined robustly over all
@@ -199,18 +199,21 @@ relocalization matches against it and the feature elements.
 *Why:* the ground barely changes, so one bad walk shouldn't make a dip that
 comes and goes; it's what the garden is planned on. Measured: walks placed by
 registration (a turn and a shift, D9) still sat 13-19 cm apart in height and
-up to 2 degrees tilted, from tracking drift; aligned, 6-9 cm. See
-[design/guided-mapping.md](design/guided-mapping.md#layers).
+up to 2 degrees tilted, from tracking drift; aligned, 6-9 cm. Built, adding
+a walk changed 2 to 6 times fewer cells (by more than 20 cm) than latest-wins.
+See [design/guided-mapping.md](design/guided-mapping.md#layers).
 
 ## D16. User edits win over measurements
 
-**Proposed** · 2026-11-16
+**Decided** · 2026-11-18 (proposed 2026-11-16) · Built: [pipeline/sites.md](pipeline/sites.md#edits)
 
 An edit is kept as its own dated evidence with the highest priority. New
 measurements that disagree don't override it; they're flagged for the user.
 
 *Why:* the user knows their yard; the cleanest fix for a wrong shape is often
-the user's, and it must survive the next walk. See
+the user's, and it must survive the next walk. Built for the ground (areas
+that are or aren't ground) and the boundary (lines where it runs); later
+walks that disagree are counted per edit. See
 [design/guided-mapping.md](design/guided-mapping.md#edits).
 
 ## D17. One tracking session per mapping run; relocalize by a guided walk, confirmed by overlay

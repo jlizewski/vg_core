@@ -133,13 +133,13 @@ def make_layers(ws: dashboard.Workspace) -> Path:
         (layers / name).mkdir(parents=True)
     (layers / "ground" / "state.asc").write_text(GRID)
     (layers / "ground" / "edits.csv").write_text(
-        "id,time,kind,points,note\n"
+        "id,time,kind,polygon,note\n"
         "edit-1,2026-11-18T18:00:00Z,not_ground,1 1;2 1;2 2,leaves, in a pile\n"
         "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1\n")
     (layers / "ground" / "edit_reviews.csv").write_text(
         "id,cells,disagreeing_cells,walks\nedit-1,12,4,fill3;fill4\n")
     (layers / "boundary" / "edits.csv").write_text(
-        "id,time,kind,points,note\nedit-2,2026-11-18T18:01:00Z,boundary,0 0;3 0,gate\n")
+        "id,time,kind,polygon,note\nedit-2,2026-11-18T18:01:00Z,boundary,0 0;3 0,gate\n")
     (layers / "boundary" / "boundary.csv").write_text(
         "x,y,edge\n0,0,structure\n4,0,assumed\n4,3,ground_end\n")
     (layers / "boundary" / "walks.csv").write_text(
@@ -214,9 +214,9 @@ def test_site_edits(tmp_path: Path):
     remake = dashboard.delete_site_edit(ws, jobs, "backyard", "edit-1")
     assert remake.args[:2] == ["site", "ground"]
     assert (layers / "ground" / "edits.csv").read_text().splitlines() == [
-        "id,time,kind,points,note", "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1"]
+        "id,time,kind,polygon,note", "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1"]
     dashboard.delete_site_edit(ws, jobs, "backyard", "edit-2")
-    assert (layers / "boundary" / "edits.csv").read_text() == "id,time,kind,points,note\n"
+    assert (layers / "boundary" / "edits.csv").read_text() == "id,time,kind,polygon,note\n"
     for bad in ["edit-1", "../x", "a,b", ""]:
         with pytest.raises(ValueError):
             dashboard.delete_site_edit(ws, jobs, "backyard", bad)

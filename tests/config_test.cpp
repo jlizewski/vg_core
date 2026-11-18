@@ -9,10 +9,14 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
+#include "vg_core/boundary.hpp"
+#include "vg_core/config/jobs.hpp"
 #include "vg_core/config/mapping_config.hpp"
 #include "vg_core/config/params.hpp"
+#include "vg_core/ground_layer.hpp"
 #include "vg_core/semantics.hpp"
 
 namespace {
@@ -206,6 +210,51 @@ TEST(MappingConfig, SemanticClassesByName) {
   p.apply_args({"--set", "build.semantics.drop_classes=peeple"});
   const auto error = error_of([&] { config.validate(); });
   EXPECT_NE(error.find("unknown semantic class peeple"), std::string::npos) << error;
+}
+
+TEST(Jobs, AddSiteEditWritesTheLayersEditsAndRemakesThem) {
+  namespace fs = std::filesystem;
+  const fs::path site = fs::temp_directory_path() / "vg_config_test_site_edit";
+  fs::remove_all(site);
+  fs::create_directories(site);
+  std::ostringstream log;
+  const auto ground = site / vg::ground_layer_file::kDir / vg::ground_layer_file::kEdits;
+  const auto boundary = site / vg::boundary_layer_file::kDir / vg::boundary_layer_file::kEdits;
+
+  // Areas go to the ground layer, lines to the boundary; ids run across both.
+  EXPECT_EQ(vg::config::add_site_edit(site, "not_ground", "0 0;1 0;1 1", "leaf pile", log),
+            "edit-1");
+  EXPECT_EQ(vg::config::add_site_edit(site, "boundary", "0 0;2 0.5", "", log), "edit-2");
+  EXPECT_EQ(vg::config::add_site_edit(site, "ground", "0 0;-1 0;-1 -1", "lawn, by the bed", log),
+            "edit-3");
+  const auto areas = vg::load_ground_edits(ground);
+  ASSERT_EQ(areas.size(), 2u);
+  EXPECT_EQ(areas[0].kind, vg::GroundEdit::Kind::NotGround);
+  EXPECT_EQ(areas[0].note, "leaf pile");
+  EXPECT_EQ(areas[1].kind, vg::GroundEdit::Kind::Ground);
+  EXPECT_EQ(areas[1].note, "lawn, by the bed");
+  EXPECT_EQ(areas[1].polygon.size(), 3u);
+  const auto lines = vg::load_ground_edits(boundary);
+  ASSERT_EQ(lines.size(), 1u);
+  EXPECT_EQ(lines[0].id, "edit-2");
+  EXPECT_EQ(lines[0].kind, vg::GroundEdit::Kind::Boundary);
+  EXPECT_DOUBLE_EQ(lines[0].polygon[1].y(), 0.5);
+  EXPECT_EQ(areas[0].time.size(), 20u);  // 2026-11-18T12:00:00Z
+  EXPECT_EQ(areas[0].time.back(), 'Z');
+
+  // Nonsense is refused and nothing is written.
+  for (const auto& [kind, points, note] :
+       std::vector<std::tuple<std::string, std::string, std::string>>{
+           {"fence", "0 0;1 0;1 1", ""},
+           {"ground", "0 0;1 0", ""},
+           {"boundary", "0 0", ""},
+           {"ground", "0 0;1 x;1 1", ""},
+           {"ground", "0 0;1 0;1 1", "two\nlines"}}) {
+    EXPECT_THROW(vg::config::add_site_edit(site, kind, points, note, log), ConfigError) << kind;
+  }
+  EXPECT_EQ(vg::load_ground_edits(ground).size(), 2u);
+  EXPECT_EQ(vg::load_ground_edits(boundary).size(), 1u);
+  fs::remove_all(site);
 }
 
 }  // namespace

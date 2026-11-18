@@ -100,8 +100,13 @@ garden-site/
     visit.asc     which visit (1 = first) each cell came from
     changes.asc   surface height change since the visit before (m)
     canopy.asc, canopy_top.asc, canopy.ply
+    ground_state.asc  the ground layer's state per cell
+    model.glb     the site in 3D
   layers/      the site's layers (design/guided-mapping.md)
     ground/       the ground from every visit, with the user's edits
+    boundary/     the site's edge, from its boundary walks, with edits
+    features/     posts, lines and blocks, matched across visits
+    guidance/     where to go and look to finish the ground
 ```
 
 `site.csv` lists each visit's package path (relative to the site when
@@ -125,6 +130,9 @@ fit. See [formats.md](../formats.md#site).
   together, then read out as in the
   [sky stage](sun-and-sky.md#canopy-the-sky-stage). Many walks see far more
   of the sky than one.
+- **The layers.** `vg site add` and `vg site maps` then remake the layers
+  (`vg site ground`, below), and `ground.asc`, `ground_state.asc` and
+  `model.glb` come from the ground layer rather than the latest walk.
 
 ## The ground layer
 
@@ -209,6 +217,28 @@ loops of 103 and 100 m, back within 20 and 8 cm of their starts; 365 and
 361 m² inside; the two outlines 8 cm apart (median), 27 cm (90%), their
 areas overlapping 96%. The edge was a structure at 41% of the points, the
 end of the seen ground at 52%, assumed at 7%.
+
+## Feature elements
+
+`vg site ground` also finds the things on the ground a person recognizes and
+relocalization can match ([features.hpp](../../include/vg_core/features.hpp)),
+in `layers/features/`:
+
+- **From each walk**: what stands through waist height (the ground stage's
+  `elements.csv`, 0.6-1.4 m above the ground, so a fence is just the fence,
+  without the shrubs at its foot or the canopy over it), as oriented boxes:
+  a **post** (small both ways: a trunk, a post), a **line** (long and thin: a
+  fence, a wall) or a **block** (the rest: a raised bed, a bin).
+- **Matched** into the site's elements, oldest walk first, by position (and
+  for lines, direction); an element's position is the mean of its sightings.
+  A walk that saw the spot but not the element misses it; missed by
+  `features.retire_after_misses` (2) walks in a row, it's kept but retired.
+- `elements.csv` has every element with its sightings, misses and spread
+  (its farthest sighting); `observations.csv` every sighting.
+
+On the yard's five guided walks: 32 posts, 5 lines and 8 blocks; seen by
+more than one walk, 6 posts within 10 cm (median of their farthest
+sightings), 3 lines within 17 cm, 4 blocks within 13 cm.
 
 ## Ground-fill guidance
 

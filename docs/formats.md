@@ -147,6 +147,16 @@ written by `vg site ground` when the site has boundary walks.
 | `edits.csv` | CSV | The user's boundary lines, in `layers/ground/edits.csv`'s format with kind `boundary` (2 or more points) |
 | `walks.csv` | CSV | Each boundary walk: `closed`, `loop_m`, `gap_m` and `overlap_offset_m` (drift round the loop), `drift_per_100m`, `vertices`, `area_m2`, `perimeter_m`, vertices by edge, whether it's the `site`'s, and its agreement with the site's (`median_apart_m`, `p90_apart_m`, `overlap`) |
 
+### `layers/features/`
+
+Feature elements ([features.hpp](../include/vg_core/features.hpp)), written by
+`vg site ground`.
+
+| File | Format | Contents |
+| --- | --- | --- |
+| `elements.csv` | CSV | Every element: `id` (e.g. `post-3`), `kind` (`post`, `line`, `block`), `class`, footprint box `center_x, center_y, length_m, width_m, axis_deg`, `height_m` over the ground, `seen` and `missed` (walks), `first_seen`, `last_seen`, `status` (`current` or `retired`), `spread_m` (farthest sighting) |
+| `observations.csv` | CSV | Every sighting: `walk, element, kind, class`, and the box and height as that walk saw it |
+
 ### `layers/guidance/`
 
 Ground-fill guidance ([guidance.hpp](../include/vg_core/guidance.hpp)), written

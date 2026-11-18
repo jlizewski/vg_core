@@ -18,7 +18,7 @@ stands on it, the canopy and sun, and many walks combine into one site.
 | Sky evidence and canopy | ✅ | [pipeline/sun-and-sky.md](pipeline/sun-and-sky.md#sky-and-canopy) |
 | Annual sun hours and energy per walk | ✅ | |
 | Sites: register walks, current maps, change | ✅ | [pipeline/sites.md](pipeline/sites.md) |
-| Guided mapping: layered site model | ⬜ | [design/guided-mapping.md](design/guided-mapping.md) (Proposed): boundary and ground first, then skyline, structures, canopy |
+| Guided mapping: layered site model | 🔨 | [design/guided-mapping.md](design/guided-mapping.md) (Proposed). Stage 1 built: ground layer, boundary, feature elements, ground-fill guidance, edits ([pipeline/sites.md](pipeline/sites.md#the-ground-layer)). Next: guidance on the phone, then structures, skyline, canopy |
 | Dashboard for the workflow | ✅ | README |
 | iOS recorder | ⬜ | In vg_flutter ([D12](decisions.md#d12-phone-apps-in-flutter-with-native-capture)); vg_core needs an iOS build |
 | Sun by month | ⬜ | Needed for planning ([garden-model.md](design/garden-model.md#what-this-needs-from-the-maps)) |
