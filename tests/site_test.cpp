@@ -196,6 +196,38 @@ TEST_F(SiteTest, MakesTheFeatureLayerFromEveryVisit) {
   EXPECT_TRUE(fs::is_regular_file(dir / vg::feature_layer_file::kObservations));
 }
 
+TEST_F(SiteTest, PlacesAWalkFromTheSameTrackingSessionInItsFrame) {
+  // Both walks recorded in one tracking session: the second is placed as the
+  // first, with no search (searching, the bed matches itself turned too).
+  for (const char* name : {"recording-20261009-175006", "recording-20261016-115329"}) {
+    const fs::path manifest = root_ / "walks" / name / vg::package_file::kManifest;
+    std::string text = read_all(manifest);
+    const std::string empty = "\"tracking_frame\": \"\"";
+    ASSERT_NE(text.find(empty), std::string::npos) << text;
+    text.replace(text.find(empty), empty.size(), "\"tracking_frame\": \"run-1\"");
+    std::ofstream(manifest, std::ios::binary) << text;
+  }
+  vg::Site site(root_ / "site");
+  site.add(root_ / "walks" / "recording-20261009-175006", {}, log_);
+  const vg::RegistrationResult second =
+      site.add(root_ / "walks" / "recording-20261016-115329", {}, log_);
+  ASSERT_TRUE(second.accepted) << log_.str();
+  EXPECT_NE(log_.str().find("same tracking session"), std::string::npos) << log_.str();
+  ASSERT_EQ(site.visits().size(), 2u);
+  EXPECT_DOUBLE_EQ(site.visits()[1].site_from_map.yaw, 0.0);
+  EXPECT_EQ(site.visits()[1].site_from_map.translation, Eigen::Vector3d::Zero());
+  // (The test bed is too small to judge a fit: placed on the session alone.)
+
+  // Switched off, it's searched for as before.
+  vg::Site other(root_ / "other");
+  other.add(root_ / "walks" / "recording-20261009-175006", {}, log_);
+  vg::RegistrationConfig config;
+  config.use_tracking_frame = false;
+  std::ostringstream log;
+  other.add(root_ / "walks" / "recording-20261016-115329", config, log, true);
+  EXPECT_EQ(log.str().find("same tracking session"), std::string::npos);
+}
+
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
   const fs::path root = fs::temp_directory_path() / "vg_site_model_test";
   fs::remove_all(root);

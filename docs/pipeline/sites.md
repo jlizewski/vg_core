@@ -39,6 +39,24 @@ the maps themselves. The reference is every visit so far, combined.
    the pairing distance shrinking from 1 m to 15 cm over 30 rounds.
 4. **Choose.** The fit lining up the most points wins.
 
+### Walks from one tracking session
+
+A walk recorded in the same tracking session as a visit already in the site
+(their recordings' `tracking_frame` match, capture format 0.2; guided mapping
+records each step this way) is in that visit's frame already: it's placed as
+that visit, with no search, after checking that it fits there
+(`evaluate_alignment()`). If it doesn't fit (the tracker jumped within the
+session), it's searched for like any walk; if there's too little to judge,
+the shared session is trusted. `site.use_tracking_frame: false` turns this
+off.
+
+On five guided walks of one yard (two runs, 2026-11-18), a ground fill
+searched for in the usual way was accepted 2.6 m from where its session put
+it (71% of its overlap within 30 cm, a weak lead over its rival); placed in
+its session's frame it fit far better (84% within 30 cm, median 9.6 cm). A
+ground fill from the other run fit a little better searched (68% vs 62%),
+the tracker's drift over a few minutes, well within the checks.
+
 ### GPS as a hint, never the judge
 
 When both walks have GPS, it narrows the heading search (within 3 sigmas of

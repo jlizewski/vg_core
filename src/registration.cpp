@@ -642,4 +642,57 @@ RegistrationResult register_map(const RegistrationInput& reference, const Regist
   return result;
 }
 
+RegistrationResult evaluate_alignment(const RegistrationInput& reference,
+                                      const RegistrationInput& map, const MapTransform& alignment,
+                                      const RegistrationConfig& config) {
+  RegistrationResult result;
+  result.reference_from_map = alignment;
+  // As the fine fit judges one: the map's standing voxels, thinned and
+  // evenly picked, against every standing voxel of the reference.
+  const auto ref_standing = standing(reference.points, reference.terrain, config.icp_min_height);
+  const auto map_points =
+      thin(standing(map.points, map.terrain, config.icp_min_height), config.icp_thin);
+  if (ref_standing.size() < 100 || map_points.size() < 100) {
+    result.problem = "too few voxels standing over the terrain to judge the fit";
+    result.judged = false;
+    return result;
+  }
+  std::vector<Eigen::Vector3d> sample;
+  const auto cap = static_cast<std::size_t>(std::max(1, config.max_icp_points));
+  const std::size_t every = std::max<std::size_t>(1, (map_points.size() + cap - 1) / cap);
+  for (std::size_t i = 0; i < map_points.size(); i += every) {
+    sample.push_back(map_points[i]);
+  }
+  const PointHash far(ref_standing, kOverlapDistance);
+  std::vector<double> distances;
+  std::size_t within_10 = 0;
+  std::size_t within_30 = 0;
+  for (const Eigen::Vector3d& p : sample) {
+    double d = 0.0;
+    if (far.nearest(alignment.apply(p), kOverlapDistance, &d) >= 0) {
+      distances.push_back(d);
+      within_10 += d <= 0.1 ? 1 : 0;
+      within_30 += d <= 0.3 ? 1 : 0;
+    }
+  }
+  result.overlap = static_cast<double>(distances.size()) / static_cast<double>(sample.size());
+  if (!distances.empty()) {
+    const auto n = static_cast<double>(distances.size());
+    result.inliers_10cm = static_cast<double>(within_10) / n;
+    result.inliers_30cm = static_cast<double>(within_30) / n;
+    result.median_distance = median(distances);
+  }
+  std::ostringstream problem;
+  if (result.overlap < config.min_overlap) {
+    problem << "too little overlap: " << 100.0 * result.overlap << "% of the walk is within "
+            << kOverlapDistance << " m of the reference";
+  } else if (result.inliers_30cm < config.min_inliers) {
+    problem << "doesn't line up: only " << 100.0 * result.inliers_30cm
+            << "% of the overlap within 0.3 m";
+  }
+  result.problem = problem.str();
+  result.accepted = result.problem.empty();
+  return result;
+}
+
 }  // namespace vg

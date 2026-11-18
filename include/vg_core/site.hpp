@@ -108,9 +108,12 @@ class Site {
 
  private:
   void save() const;
+  // Registers the package against every visit, or, given a known alignment,
+  // checks how well it fits there (evaluate_alignment()).
   RegistrationResult fit(const std::filesystem::path& package, MapPackage& map,
                          const RegistrationInput& input, const RegistrationConfig& config,
-                         std::ostream& log) const;
+                         std::ostream& log,
+                         const std::optional<MapTransform>& known = std::nullopt) const;
 
   std::filesystem::path dir_;
   std::vector<SiteVisit> visits_;

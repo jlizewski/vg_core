@@ -64,6 +64,10 @@ struct RegistrationConfig {
   // Use each map's GPS heading and position, when both have them (see
   // Site::add), to narrow the heading search and weigh the fits.
   bool use_gps = true;
+  // A walk recorded in the same tracking session as a visit already in the
+  // site (their recordings' tracking_frame match) is placed as that visit,
+  // with no search, if it fits there (see Site::add).
+  bool use_tracking_frame = true;
   // 1-sigma error of a walk's GPS position relative to another's, in meters.
   // Walks minutes apart share most of their GPS error: three on one day
   // landed 2.7-4.2 m from where GPS put them.
@@ -133,6 +137,9 @@ struct RegistrationResult {
   // Whether it passed the acceptance checks; why not, if it didn't.
   bool accepted = false;
   std::string problem;
+  // False if there was too little to judge the fit at all (too few features
+  // or standing voxels), rather than a fit that failed its checks.
+  bool judged = true;
 };
 
 // What GPS says about where the map sits in the reference, if anything.
@@ -147,6 +154,14 @@ struct RegistrationPrior {
   std::optional<Eigen::Vector2d> origin;
   double origin_sigma = 0.0;
 };
+
+// How well map fits reference placed by a given alignment, with no search:
+// the fine fit's overlap and inliers, and its acceptance checks (the rival
+// ratio isn't judged). E.g. for a walk recorded in the same tracking session
+// as one already placed, whose alignment is known.
+RegistrationResult evaluate_alignment(const RegistrationInput& reference,
+                                      const RegistrationInput& map, const MapTransform& alignment,
+                                      const RegistrationConfig& config = {});
 
 // Registers map into reference.
 RegistrationResult register_map(const RegistrationInput& reference, const RegistrationInput& map,

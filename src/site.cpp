@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <locale>
 #include <sstream>
@@ -249,6 +250,21 @@ void require_site_maps(const std::filesystem::path& package) {
   }
 }
 
+// A string value from a package's manifest.json ("" if it has none): a
+// plain lookup, enough for the flat string fields the build writes.
+std::string manifest_string(const std::filesystem::path& package, const std::string& key) {
+  std::ifstream in(package / package_file::kManifest);
+  const std::string text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+  const std::string marker = "\"" + key + "\": \"";
+  const std::size_t at = text.find(marker);
+  if (at == std::string::npos) {
+    return {};
+  }
+  const std::size_t from = at + marker.size();
+  const std::size_t to = text.find('"', from);
+  return to == std::string::npos ? std::string() : text.substr(from, to - from);
+}
+
 RegistrationInput registration_input(const std::filesystem::path& package, MapPackage& map) {
   RegistrationInput input;
   input.points = map.occupied_centers();
@@ -296,7 +312,37 @@ RegistrationResult Site::add(const std::filesystem::path& package, const Registr
     log << "site: " << package.string() << " is the first visit: it sets the site's frame"
         << std::endl;
   } else {
-    result = fit(package, map, registration_input(package, map), config, log);
+    const RegistrationInput input = registration_input(package, map);
+    // Recorded in the same tracking session as a visit already here: its
+    // poses are in that visit's frame, so it's placed as that visit, if it
+    // fits there (a tracker can still jump within a session).
+    const std::string frame = manifest_string(package, "tracking_frame");
+    const SiteVisit* same = nullptr;
+    for (const SiteVisit& v : visits_) {
+      if (config.use_tracking_frame && !frame.empty() &&
+          manifest_string(package_dir(v), "tracking_frame") == frame) {
+        same = &v;
+        break;
+      }
+    }
+    if (same != nullptr) {
+      result = fit(package, map, input, config, log, same->site_from_map);
+      if (result.accepted || !result.judged) {
+        // Too little to judge isn't evidence against the tracking session.
+        log << "site: " << package.string() << " was recorded in the same tracking session as "
+            << same->package.generic_string() << ": placed in its frame"
+            << (result.judged ? "" : " (too little to check the fit there)") << std::endl;
+        result.accepted = true;
+        result.problem.clear();
+      } else {
+        log << "site: " << package.string() << " shares a tracking session with "
+            << same->package.generic_string() << " but doesn't fit in its frame ("
+            << result.problem << "); searching instead" << std::endl;
+        result = fit(package, map, input, config, log);
+      }
+    } else {
+      result = fit(package, map, input, config, log);
+    }
     visit.site_from_map = result.reference_from_map;
     visit.fit = result;
     if (!result.accepted) {
@@ -319,7 +365,7 @@ RegistrationResult Site::add(const std::filesystem::path& package, const Registr
 
 RegistrationResult Site::fit(const std::filesystem::path& package, MapPackage& map,
                              const RegistrationInput& input, const RegistrationConfig& config,
-                             std::ostream& log) const {
+                             std::ostream& log, const std::optional<MapTransform>& known) const {
   const auto start = std::chrono::steady_clock::now();
   // The reference: every visit so far, in the site frame.
   RegistrationInput reference;
@@ -361,6 +407,14 @@ RegistrationResult Site::fit(const std::filesystem::path& package, MapPackage& m
   reference.features = resample(features, false).latest;
   reference.terrain = resample(terrains, true).latest;
 
+  if (known) {
+    const RegistrationResult result = evaluate_alignment(reference, input, *known, config);
+    log << "site: " << package.string() << " checked in its tracking session's frame: overlap "
+        << 100.0 * result.overlap << "%, of it within 10 cm " << 100.0 * result.inliers_10cm
+        << "%, within 30 cm " << 100.0 * result.inliers_30cm << "%, median "
+        << 100.0 * result.median_distance << " cm (" << seconds_since(start) << " s)" << std::endl;
+    return result;
+  }
   const RegistrationResult result = register_map(reference, input, config, prior);
   const MapTransform& t = result.reference_from_map;
   log << "site: " << package.string() << " -> yaw " << t.yaw * 180.0 / kPi << " deg, shift ("

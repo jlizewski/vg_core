@@ -375,6 +375,10 @@ ParamSet bind(MappingConfig& c) {
             "Registering walks into a site (vg site add): one place mapped over many visits. "
             "The heading and shift are found from the maps; GPS only narrows the search.");
   RegistrationConfig& reg = c.registration;
+  p.add("site.use_tracking_frame", reg.use_tracking_frame,
+        "Place a walk recorded in the same tracking session as a visit already in the site "
+        "(their recordings' tracking_frame match) as that visit, with no search, if it fits "
+        "there.");
   p.add("site.use_gps", reg.use_gps,
         "Use the walks' GPS headings and positions, when they have them: they narrow the "
         "heading search and break near ties between fits.");

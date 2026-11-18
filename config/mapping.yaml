@@ -273,6 +273,10 @@ semantics:
 # visits. The heading and shift are found from the maps; GPS only narrows the
 # search.
 site:
+  # Place a walk recorded in the same tracking session as a visit already in the
+  # site (their recordings' tracking_frame match) as that visit, with no search,
+  # if it fits there.
+  use_tracking_frame: true
   # Use the walks' GPS headings and positions, when they have them: they narrow
   # the heading search and break near ties between fits.
   use_gps: true

@@ -125,6 +125,23 @@ TEST(RegistrationTest, FindsAWalkTurnedAndShiftedWithoutGps) {
   EXPECT_TRUE(r.rival_ratio == 0.0 || r.rival_ratio > 1.3);
 }
 
+TEST(RegistrationTest, EvaluatesAKnownAlignmentWithoutSearching) {
+  const auto reference = walk({});
+  const auto world_from_map = transform(137, 3.0, -2.0, 0.4);
+  const auto map = walk(world_from_map);
+  // Where it is: it fits.
+  const vg::RegistrationResult right = vg::evaluate_alignment(reference, map, world_from_map);
+  EXPECT_TRUE(right.accepted) << right.problem;
+  EXPECT_GT(right.inliers_10cm, 0.9);
+  EXPECT_DOUBLE_EQ(right.reference_from_map.yaw, world_from_map.yaw);
+  // 2.5 m off (as a placement can be): it doesn't, and it's left there.
+  const auto off = transform(137, 5.5, -2.0, 0.4);
+  const vg::RegistrationResult wrong = vg::evaluate_alignment(reference, map, off);
+  EXPECT_FALSE(wrong.accepted);
+  EXPECT_FALSE(wrong.problem.empty());
+  EXPECT_DOUBLE_EQ(wrong.reference_from_map.translation.x(), 5.5);
+}
+
 TEST(RegistrationTest, MatchesPartlyOverlappingWalks) {
   // Each walk saw a different, overlapping part of the yard.
   const auto reference = walk({}, [](double x, double) { return x < 11.0; });

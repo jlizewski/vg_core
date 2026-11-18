@@ -224,5 +224,7 @@ on an overlay. GPS (and the compass) order candidates but never decide.
 
 *Why:* measured: short captures register right without GPS when accepted but
 are mostly refused as ambiguous, and with GPS a third were placed 4–12 m off
-with high confidence. See
+with high confidence. Within a run, a walk searched for was once accepted
+2.6 m off where its tracking session put it; placed by the session it fit
+far better (see [pipeline/sites.md](pipeline/sites.md#walks-from-one-tracking-session)). See
 [design/guided-mapping.md](design/guided-mapping.md#relocalization-what-we-measured).
