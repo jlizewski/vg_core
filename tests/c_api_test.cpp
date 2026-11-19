@@ -177,6 +177,8 @@ TEST(CApi, RecordsASessionTheReaderReadsBack) {
   info.platform = "synthetic";
   info.start_time_ns = 5 * kMs;
   info.utc_offset_ns = 1'700'000'000'000'000'000;
+  info.session_type = VG_SESSION_BOUNDARY_WALK;
+  info.tracking_frame = "3f1c9a52-7e0b-4d1a-9c55-0d2b6f8e4a10";
   vg_recorder* recorder = nullptr;
   ASSERT_EQ(vg_recorder_open(utf8(file).c_str(), &info, &recorder), VG_OK) << vg_last_error();
 
@@ -217,6 +219,11 @@ TEST(CApi, RecordsASessionTheReaderReadsBack) {
             VG_ERROR_INVALID_ARGUMENT);
   const vg_imu_sample imu{13 * kMs, {0.1, 0.2, 0.3}, {0.0, 0.0, 9.81}};
   EXPECT_EQ(vg_recorder_write_imu(recorder, &imu), VG_OK);
+  vg_magnetometer_sample mag{13 * kMs, {21.5, -4.25, -40.0}, 3};
+  EXPECT_EQ(vg_recorder_write_magnetometer(recorder, &mag), VG_OK) << vg_last_error();
+  mag.accuracy = 4;
+  EXPECT_EQ(vg_recorder_write_magnetometer(recorder, &mag), VG_ERROR_INVALID_ARGUMENT);
+  EXPECT_EQ(vg_recorder_write_magnetometer(recorder, nullptr), VG_ERROR_INVALID_ARGUMENT);
   vg_gps_fix fix{};
   fix.timestamp_ns = 14 * kMs;
   fix.latitude = 41.88;
@@ -237,6 +244,9 @@ TEST(CApi, RecordsASessionTheReaderReadsBack) {
     if (const auto* s = std::get_if<vg::io::SessionInfo>(&*message)) {
       EXPECT_EQ(s->producer, "vg_core tests");
       EXPECT_EQ(s->utc_offset_ns, info.utc_offset_ns);
+      EXPECT_EQ(s->format_version, "0.2");
+      EXPECT_EQ(s->session_type, "boundary_walk");
+      EXPECT_EQ(s->tracking_frame, info.tracking_frame);
       seen |= 1;
     } else if (const auto* c = std::get_if<vg::io::CameraCalibration>(&*message)) {
       EXPECT_EQ(c->camera, "rgb");
@@ -271,9 +281,42 @@ TEST(CApi, RecordsASessionTheReaderReadsBack) {
       EXPECT_DOUBLE_EQ(g->latitude, 41.88);
       EXPECT_DOUBLE_EQ(g->position_covariance(2, 2), 9.0);
       seen |= 128;
+    } else if (const auto* m = std::get_if<vg::MagnetometerSample>(&*message)) {
+      EXPECT_EQ(m->timestamp, 13 * kMs);
+      EXPECT_DOUBLE_EQ(m->field.y(), -4.25);
+      EXPECT_EQ(m->accuracy, 3);
+      seen |= 256;
     }
   }
-  EXPECT_EQ(seen, 255);
+  EXPECT_EQ(seen, 511);
+}
+
+TEST(CApi, RecordsAFreeWalkAndRefusesUnknownSessionTypes) {
+  TempDir dir("vg_c_api_session_type");
+  const auto file = dir.path() / "walk.vgcap.mcap";
+  vg_session_info info{};
+  info.producer = "vg_core tests";
+  info.platform = "synthetic";
+  info.session_type = "boundary";  // Not a VG_SESSION_* value.
+  vg_recorder* recorder = nullptr;
+  EXPECT_EQ(vg_recorder_open(utf8(file).c_str(), &info, &recorder), VG_ERROR_INVALID_ARGUMENT);
+  EXPECT_NE(std::string(vg_last_error()).find("boundary"), std::string::npos);
+  EXPECT_EQ(recorder, nullptr);
+
+  info.session_type = nullptr;  // A free walk; no tracking frame.
+  ASSERT_EQ(vg_recorder_open(utf8(file).c_str(), &info, &recorder), VG_OK) << vg_last_error();
+  ASSERT_EQ(vg_recorder_close(recorder), VG_OK);
+  vg_recorder_free(recorder);
+  vg::io::SessionReader reader(file);
+  bool found = false;
+  while (const auto message = reader.next()) {
+    if (const auto* s = std::get_if<vg::io::SessionInfo>(&*message)) {
+      EXPECT_EQ(s->session_type, "");
+      EXPECT_EQ(s->tracking_frame, "");
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
 }
 
 TEST(CApi, BuildsALiveMap) {

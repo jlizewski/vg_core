@@ -11,7 +11,7 @@ over the C++ library. Decision: [D11](decisions.md#d11-a-c-api-for-the-app-bindi
 | Area | Functions | Used by |
 | --- | --- | --- |
 | Library | `vg_api_version`, `vg_version_string`, `vg_last_error` | Everyone |
-| Recording | `vg_recorder_*` | Capture plugins: write a recording in the [capture format](capture-format.md) |
+| Recording | `vg_recorder_*` | Capture plugins: write a recording in the [capture format](capture-format.md), including guided mapping's session type, tracking frame and magnetometer (format 0.2) |
 | Live map | `vg_map_builder_*` | The phone's live preview while walking |
 | 2D maps | `vg_grid_*` | Showing any `.asc` map: ground, sun hours, ... |
 | Packages | `vg_package_*` | The 3D voxel view, where a walk is on the Earth |
@@ -66,6 +66,8 @@ in the [capture format](capture-format.md#conventions).
 **Versions.** `VG_C_API_VERSION` in the header must equal
 `vg_api_version()` from the library. Check it at start-up. The number goes up
 whenever a declaration changes in a way that breaks existing callers.
+Version 2 (2026-11-19) added `session_type` and `tracking_frame` to
+`vg_session_info` (a layout change) and `vg_recorder_write_magnetometer`.
 
 ## Examples
 
@@ -77,6 +79,8 @@ info.producer = "vg_flutter 0.1.0";
 info.platform = "arcore";
 info.start_time_ns = now_ns;
 info.utc_offset_ns = utc_ns - now_ns;
+info.session_type = VG_SESSION_BOUNDARY_WALK;  // NULL for a free walk
+info.tracking_frame = ar_session_uuid;         // new each time the AR session (re)starts
 
 vg_recorder* rec = NULL;
 if (vg_recorder_open(path, &info, &rec) != VG_OK) {
@@ -93,6 +97,10 @@ depth.intrinsics = depth_intrinsics;
 depth.depth_mm = arcore_depth;        // or depth_m for float meters
 depth.confidence = arcore_confidence; // optional
 vg_recorder_write_depth(rec, "rgb", &depth);
+
+// From the sensor thread (Android: TYPE_MAGNETIC_FIELD, in body axes):
+vg_magnetometer_sample mag = {t, {mx, my, mz}, accuracy};  // microtesla, 0-3
+vg_recorder_write_magnetometer(rec, &mag);
 
 vg_recorder_close(rec);  // writes the index; check its status
 vg_recorder_free(rec);

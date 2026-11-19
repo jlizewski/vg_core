@@ -48,7 +48,7 @@ extern "C" {
 
 /* Version of this header. Compare with vg_api_version() at start-up: a
  * library built from a different header may not match these declarations. */
-#define VG_C_API_VERSION 1
+#define VG_C_API_VERSION 2
 
 typedef int32_t vg_status;
 enum {
@@ -131,6 +131,15 @@ typedef struct vg_geo_reference {
 
 typedef struct vg_recorder vg_recorder;
 
+/* What a recording is for in guided mapping (vg_session_info.session_type;
+ * docs/capture-format.md#guided-mapping-sessions). NULL or "" is a free walk. */
+#define VG_SESSION_BOUNDARY_WALK "boundary_walk"
+#define VG_SESSION_GROUND_FILL "ground_fill"
+#define VG_SESSION_SKYLINE_STATION "skyline_station"
+#define VG_SESSION_STRUCTURE_STATION "structure_station"
+#define VG_SESSION_CANOPY_STATION "canopy_station"
+#define VG_SESSION_RELOCALIZATION "relocalization"
+
 typedef struct vg_session_info {
   const char* producer;     /* e.g. "vg_flutter 0.1.0" */
   const char* platform;     /* "arcore", "arkit", "rig", ... */
@@ -138,6 +147,13 @@ typedef struct vg_session_info {
   int64_t start_time_ns;
   int64_t utc_offset_ns; /* UTC = session clock + this */
   const char* notes;     /* may be NULL */
+  /* Since API version 2. A VG_SESSION_* value, or NULL / "" for a free walk;
+   * anything else is refused. */
+  const char* session_type;
+  /* Since API version 2. The tracker's world frame: a new unique string (a
+   * UUID) each time the AR session starts or restarts, the same in every
+   * recording made while it keeps running. NULL or "" if unknown. */
+  const char* tracking_frame;
 } vg_session_info;
 
 enum {
@@ -158,6 +174,15 @@ typedef struct vg_imu_sample {
   double angular_velocity[3];    /* rad/s, body frame */
   double linear_acceleration[3]; /* m/s^2, body frame */
 } vg_imu_sample;
+
+/* Magnetometer (since API version 2): the platform-calibrated field in the
+ * body frame, microtesla, with the platform's accuracy: 0 unreliable, 1 low,
+ * 2 medium, 3 high (Android's SENSOR_STATUS_*), 0 if unknown. */
+typedef struct vg_magnetometer_sample {
+  int64_t timestamp_ns;
+  double field[3]; /* microtesla, body frame */
+  int32_t accuracy;
+} vg_magnetometer_sample;
 
 typedef struct vg_gps_fix {
   int64_t timestamp_ns;
@@ -191,6 +216,8 @@ VG_API vg_status vg_recorder_write_pose(vg_recorder* recorder, int64_t timestamp
 VG_API vg_status vg_recorder_write_tracking(vg_recorder* recorder, int64_t timestamp_ns,
                                             int32_t state, const char* reason);
 VG_API vg_status vg_recorder_write_imu(vg_recorder* recorder, const vg_imu_sample* sample);
+VG_API vg_status vg_recorder_write_magnetometer(vg_recorder* recorder,
+                                                const vg_magnetometer_sample* sample);
 VG_API vg_status vg_recorder_write_gps(vg_recorder* recorder, const vg_gps_fix* fix);
 /* Finishes the file (writes its index). Writing after this fails. */
 VG_API vg_status vg_recorder_close(vg_recorder* recorder);

@@ -8,6 +8,11 @@ int vg_c_header_check(void);
 int vg_c_header_check(void) {
   vg_pose pose = {{0.0, 0.0, 0.0, 1.0}, {0.0, 0.0, 0.0}};
   vg_depth_frame frame = {0};
+  vg_session_info info = {0};
+  vg_magnetometer_sample mag = {0};
+  info.session_type = VG_SESSION_GROUND_FILL;
+  (void)info;
+  (void)mag;
   vg_map_builder_config config;
   if (vg_map_builder_config_defaults(&config) != VG_OK) {
     return 0;

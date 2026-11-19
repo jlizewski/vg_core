@@ -1,8 +1,10 @@
 // The C API's recorder: vg::io::SessionWriter behind a handle and a mutex.
 
+#include <array>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <string>
 
 #include "common.hpp"
 #include "vg_core/io/session_writer.hpp"
@@ -43,6 +45,20 @@ vg_status vg_recorder_open(const char* path, const vg_session_info* info, vg_rec
     session.start_time = info->start_time_ns;
     session.utc_offset_ns = info->utc_offset_ns;
     session.notes = text(info->notes);
+    session.session_type = text(info->session_type);
+    namespace types = vg::io::session_type;
+    const std::array<const char*, 7> known = {
+        types::kFree,           types::kBoundaryWalk,  types::kGroundFill,
+        types::kSkylineStation, types::kStructureStation, types::kCanopyStation,
+        types::kRelocalization};
+    bool is_known = false;
+    for (const char* k : known) {
+      is_known = is_known || session.session_type == k;
+    }
+    if (!is_known) {
+      throw std::invalid_argument("info: unknown session_type '" + session.session_type + "'");
+    }
+    session.tracking_frame = text(info->tracking_frame);
     auto recorder = std::make_unique<vg_recorder>();
     recorder->writer = std::make_unique<vg::io::SessionWriter>(file, session);
     *out = recorder.release();
@@ -164,6 +180,22 @@ vg_status vg_recorder_write_imu(vg_recorder* recorder, const vg_imu_sample* samp
                                               sample->linear_acceleration[1],
                                               sample->linear_acceleration[2]);
     write_locked(recorder, imu);
+  });
+}
+
+vg_status vg_recorder_write_magnetometer(vg_recorder* recorder,
+                                        const vg_magnetometer_sample* sample) {
+  return guard([&] {
+    require(recorder, "recorder");
+    require(sample, "sample");
+    if (sample->accuracy < 0 || sample->accuracy > 3) {
+      throw std::invalid_argument("sample: accuracy must be 0 to 3");
+    }
+    vg::MagnetometerSample mag;
+    mag.timestamp = sample->timestamp_ns;
+    mag.field = Eigen::Vector3d(sample->field[0], sample->field[1], sample->field[2]);
+    mag.accuracy = sample->accuracy;
+    write_locked(recorder, mag);
   });
 }
 
