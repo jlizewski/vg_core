@@ -268,6 +268,7 @@ build:
 vg site edit garden-site not_ground "x y;x y;x y;..." the deck   # an area that isn't ground
 vg site edit garden-site ground "x y;x y;x y;..." lawn           # an area that is
 vg site edit garden-site boundary "x y;x y" across the gate      # where the boundary runs
+vg site delete-edit garden-site edit-3                          # take one back
 ```
 
 - **Areas** (`layers/ground/edits.csv`): *not ground* covers them, *ground*
@@ -293,8 +294,12 @@ stretches blue), feature elements, the guidance (numbered holes, spots and
 which way to face) and each edit drawn over it. Pick *not ground*, *ground* or
 *boundary* beside **Edit**, click the points on the map, and **Save edit**:
 that runs `vg site edit`, which remakes the layers. The Edits card lists each
-edit with its review and a **Delete** button, which takes the line out of its
-edits file and remakes the layers (`vg site ground`).
+edit with its review and a **Delete** button (`vg site delete-edit`). Edit
+ids are never reused: a new one is numbered after the highest so far.
+
+Apps read the layers through the C API (`vg_site_layers_*`, built on
+[site_layers.hpp](../../include/vg_core/site_layers.hpp)) and make and delete
+edits with its jobs; see [c-api.md](../c-api.md#guided-mapping-a-sites-layers).
 
 ## What sites don't do yet
 

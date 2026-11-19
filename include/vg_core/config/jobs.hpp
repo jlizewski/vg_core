@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "vg_core/ground_layer.hpp"
+
 namespace vg::config {
 
 // vg replay: builds a map package in package_dir from a recording (replacing
@@ -54,6 +56,17 @@ void make_site_maps(const std::filesystem::path& site_dir,
 std::string add_site_edit(const std::filesystem::path& site_dir, const std::string& kind,
                           const std::string& points, const std::string& note,
                           std::ostream& log);
+
+// The same with the edit's kind and points given (its id and time are set
+// here). Throws ConfigError on too few points or a note of several lines.
+std::string add_site_edit(const std::filesystem::path& site_dir, GroundEdit edit,
+                          std::ostream& log);
+
+// vg site delete-edit: takes the edit with this id out of the site's edits
+// (either layer's), then remakes its layers. Throws ConfigError if there's
+// no such edit.
+void delete_site_edit(const std::filesystem::path& site_dir, const std::string& id,
+                      std::ostream& log);
 
 // vg site ground: builds the site's ground layer (layers/ground/) and feature
 // elements (layers/features/) with the ground_layer and features settings,

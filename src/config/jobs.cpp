@@ -4,6 +4,7 @@
 #include <locale>
 #include <sstream>
 #include <iomanip>
+#include <cstdlib>
 #include <ctime>
 #include <fstream>
 #include <string>
@@ -147,6 +148,7 @@ std::string add_site_edit(const std::filesystem::path& site_dir, const std::stri
                           const std::string& points, const std::string& note,
                           std::ostream& log) {
   GroundEdit e;
+  e.note = note;
   if (kind == "ground") {
     e.kind = GroundEdit::Kind::Ground;
   } else if (kind == "not_ground") {
@@ -167,15 +169,24 @@ std::string add_site_edit(const std::filesystem::path& site_dir, const std::stri
     }
     e.polygon.emplace_back(x, y);
   }
+  return add_site_edit(site_dir, std::move(e), log);
+}
+
+std::string add_site_edit(const std::filesystem::path& site_dir, GroundEdit e,
+                          std::ostream& log) {
   const bool line = e.kind == GroundEdit::Kind::Boundary;
+  for (const Eigen::Vector2d& p : e.polygon) {
+    if (!p.allFinite()) {
+      throw ConfigError("edit: a point isn't a number");
+    }
+  }
   if (e.polygon.size() < (line ? 2u : 3u)) {
     throw ConfigError(line ? "edit: a boundary line needs at least 2 points"
                            : "edit: an area needs at least 3 points");
   }
-  if (note.find('\n') != std::string::npos) {
+  if (e.note.find_first_of("\r\n") != std::string::npos) {
     throw ConfigError("edit: the note must be one line");
   }
-  e.note = note;
   // The time now, UTC, ISO 8601.
   const std::time_t now = std::time(nullptr);
   std::tm utc{};
@@ -193,16 +204,44 @@ std::string add_site_edit(const std::filesystem::path& site_dir, const std::stri
   const auto boundary_file = site_dir / boundary_layer_file::kDir / boundary_layer_file::kEdits;
   std::vector<GroundEdit> ground = load_ground_edits(ground_file);
   std::vector<GroundEdit> boundary = load_ground_edits(boundary_file);
-  e.id = "edit-" + std::to_string(ground.size() + boundary.size() + 1);
+  // One more than the highest, so an id is never reused after a delete.
+  long highest = 0;
+  for (const auto* edits : {&ground, &boundary}) {
+    for (const GroundEdit& existing : *edits) {
+      if (existing.id.rfind("edit-", 0) == 0) {
+        highest = std::max(highest, std::strtol(existing.id.c_str() + 5, nullptr, 10));
+      }
+    }
+  }
+  e.id = "edit-" + std::to_string(highest + 1);
   std::vector<GroundEdit>& into = line ? boundary : ground;
   const auto& file = line ? boundary_file : ground_file;
   into.push_back(e);
   std::filesystem::create_directories(file.parent_path());
   save_ground_edits(into, file);
-  log << "edit: " << e.id << " (" << kind << ", " << e.polygon.size() << " points) -> "
-      << file.string() << std::endl;
+  log << "edit: " << e.id << " (" << edit_kind_name(e.kind) << ", " << e.polygon.size()
+      << " points) -> " << file.string() << std::endl;
   make_site_ground(site_dir, {}, log);
   return e.id;
+}
+
+void delete_site_edit(const std::filesystem::path& site_dir, const std::string& id,
+                      std::ostream& log) {
+  for (const auto& file : {site_dir / ground_layer_file::kDir / ground_layer_file::kEdits,
+                           site_dir / boundary_layer_file::kDir / boundary_layer_file::kEdits}) {
+    std::vector<GroundEdit> edits = load_ground_edits(file);
+    const auto it =
+        std::find_if(edits.begin(), edits.end(), [&](const GroundEdit& e) { return e.id == id; });
+    if (it == edits.end()) {
+      continue;
+    }
+    edits.erase(it);
+    save_ground_edits(edits, file);
+    log << "edit: " << id << " deleted from " << file.string() << std::endl;
+    make_site_ground(site_dir, {}, log);
+    return;
+  }
+  throw ConfigError("delete-edit: no edit '" + id + "' in " + site_dir.string());
 }
 
 void make_site_ground(const std::filesystem::path& site_dir,

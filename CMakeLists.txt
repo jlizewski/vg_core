@@ -65,6 +65,7 @@ add_library(vg_core
   src/solar.cpp
   src/registration.cpp
   src/site.cpp
+  src/site_layers.cpp
   src/sky.cpp
   src/sun_map.cpp
   src/surface_mesh.cpp
@@ -142,6 +143,7 @@ if(VG_CORE_BUILD_IO)
   # The C API: one header (include/vg_core_c/vg_core_c.h) over the C++ library.
   if(VG_CORE_BUILD_C)
     set(_vg_core_c_sources
+      src/c_api/layers.cpp
       src/c_api/library.cpp
       src/c_api/map_builder.cpp
       src/c_api/maps.cpp

@@ -198,7 +198,7 @@ def test_ground_layer_maps(tmp_path: Path):
 
 def test_site_edits(tmp_path: Path):
     ws = make_workspace(tmp_path)
-    layers = make_layers(ws)
+    make_layers(ws)
     jobs = dashboard.Jobs(tmp_path, command=[sys.executable, "-c", "pass"])
     job = dashboard.start_site_edit(ws, jobs, "backyard", "not_ground",
                                     [[1, 2], [3, 4.5], [5, 6]], "  chairs\n stacked ")
@@ -211,13 +211,11 @@ def test_site_edits(tmp_path: Path):
         with pytest.raises(ValueError):
             dashboard.start_site_edit(ws, jobs, "backyard", kind, points, "")
 
-    remake = dashboard.delete_site_edit(ws, jobs, "backyard", "edit-1")
-    assert remake.args[:2] == ["site", "ground"]
-    assert (layers / "ground" / "edits.csv").read_text().splitlines() == [
-        "id,time,kind,polygon,note", "edit-3,2026-11-18T18:05:00Z,ground,0 0;1 0;1 1"]
-    dashboard.delete_site_edit(ws, jobs, "backyard", "edit-2")
-    assert (layers / "boundary" / "edits.csv").read_text() == "id,time,kind,polygon,note\n"
-    for bad in ["edit-1", "../x", "a,b", ""]:
+    delete = dashboard.delete_site_edit(ws, jobs, "backyard", "edit-2")  # A boundary line.
+    assert delete.args[:2] == ["site", "delete-edit"] and delete.args[2].endswith("backyard")
+    assert delete.args[3] == "edit-2"
+    assert dashboard.delete_site_edit(ws, jobs, "backyard", "edit-1").args[3] == "edit-1"
+    for bad in ["edit-9", "../x", "a,b", ""]:
         with pytest.raises(ValueError):
             dashboard.delete_site_edit(ws, jobs, "backyard", bad)
 

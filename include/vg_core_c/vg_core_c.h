@@ -392,6 +392,142 @@ VG_API vg_status vg_site_visit_count(const vg_site* site, size_t* count);
 /* Visits are oldest first. */
 VG_API vg_status vg_site_get_visit(const vg_site* site, size_t index, vg_site_visit* out);
 
+/* ===== Site layers (include/vg_core/site_layers.hpp) ================= */
+
+/* A site's layers as vg_site_make_ground (or vg_site_add, vg_site_make_maps)
+ * last made them: the ground with a state per cell, the boundary, feature
+ * elements, ground-fill guidance and the user's edits. All in the site frame,
+ * meters. See docs/pipeline/sites.md. Since API version 2. */
+typedef struct vg_site_layers vg_site_layers;
+
+/* Ground cell states (the VG_GROUND_STATE grid's values; NaN is outside). */
+enum {
+  VG_GROUND_OUTSIDE = 0,
+  VG_GROUND_MEASURED = 1, /* seen as ground */
+  VG_GROUND_FILLED = 2,   /* a small hole or under something low, filled in */
+  VG_GROUND_COVERED = 3,  /* under something standing; the ground runs on beneath */
+  VG_GROUND_UNKNOWN = 4   /* a hole not yet seen: go and look */
+};
+
+/* Where a ground cell's value came from (the VG_GROUND_PROVENANCE grid). */
+enum {
+  VG_PROVENANCE_NONE = 0,
+  VG_PROVENANCE_MEASURED = 1,
+  VG_PROVENANCE_INFERRED = 2,
+  VG_PROVENANCE_EDITED = 3,
+  VG_PROVENANCE_CONFIRMED = 4
+};
+
+/* The ground layer's grids (vg_site_layers_ground_grid). */
+enum {
+  VG_GROUND_GRID_HEIGHT = 0,       /* m; NaN outside and over unknown cells */
+  VG_GROUND_GRID_STATE = 1,        /* VG_GROUND_*; NaN outside */
+  VG_GROUND_GRID_PROVENANCE = 2,   /* VG_PROVENANCE_*; NaN where none */
+  VG_GROUND_GRID_OBSERVATIONS = 3, /* how many walks measured the cell */
+  VG_GROUND_GRID_SPREAD = 4        /* m: how far the farthest walk is from the height */
+};
+
+/* How a boundary vertex was found. */
+enum {
+  VG_EDGE_STRUCTURE = 0,  /* a fence, a wall, a hedge */
+  VG_EDGE_GROUND_END = 1, /* where the seen ground ends */
+  VG_EDGE_ASSUMED = 2,    /* neither nearby: assumed, for the user to confirm */
+  VG_EDGE_EDITED = 3      /* drawn by the user */
+};
+
+typedef struct vg_boundary_vertex {
+  double x, y;
+  int32_t edge; /* VG_EDGE_* */
+  double push;  /* how far out from the walk's path, m */
+} vg_boundary_vertex;
+
+enum { VG_FEATURE_POST = 0, VG_FEATURE_LINE = 1, VG_FEATURE_BLOCK = 2 };
+
+/* A feature element: its footprint (a box) and what it is. */
+typedef struct vg_feature {
+  const char* id;         /* e.g. "post-3"; owned by the layers */
+  int32_t kind;           /* VG_FEATURE_* */
+  int32_t semantic_class; /* VG_CLASS_* */
+  double x, y;            /* center */
+  double length, width;   /* along and across its axis, m */
+  double axis;            /* radians from x, [0, pi) */
+  double height;          /* top above the ground, m */
+  int32_t seen;           /* walks that saw it */
+  int32_t missed;         /* walks in a row since that covered it but didn't */
+  int32_t retired;        /* missed too often; kept, not current */
+  double spread;          /* farthest sighting from its position, m */
+} vg_feature;
+
+/* A spot to stand on to see a hole, and which way to face. */
+typedef struct vg_look_spot {
+  double x, y;
+  double heading;  /* radians from x, toward what it sees */
+  double distance; /* to the hole's nearest cell, m */
+  double sees;     /* share of the hole in view from here, 0-1 */
+} vg_look_spot;
+
+/* A hole in the ground (unknown cells) to go and look at. */
+typedef struct vg_guidance_target {
+  int32_t rank;  /* 1 = largest */
+  int32_t order; /* when to visit it, 1 = first (nearest next) */
+  double area;   /* m^2 */
+  double center_x, center_y;
+  double seen;       /* share of it in view from its spots together */
+  size_t first_spot; /* its spots: spots[first_spot .. first_spot + spot_count) */
+  size_t spot_count;
+} vg_guidance_target;
+
+enum { VG_EDIT_GROUND = 0, VG_EDIT_NOT_GROUND = 1, VG_EDIT_BOUNDARY = 2 };
+
+/* A user's edit, and (area edits) how walks recorded after it agree. */
+typedef struct vg_site_edit {
+  const char* id;       /* "edit-N" */
+  const char* time;     /* ISO 8601 UTC */
+  int32_t kind;         /* VG_EDIT_* */
+  const double* points; /* x0, y0, x1, y1, ...: an area, or a boundary line */
+  size_t point_count;
+  const char* note; /* "" if none */
+  int32_t reviewed; /* 0 for boundary lines and before the layers are made again */
+  size_t cells;     /* the area's cells */
+  size_t disagreeing_cells;
+  const char* disagreeing_walks; /* walks since the edit that disagree, ';'-separated */
+} vg_site_edit;
+
+typedef struct vg_site_layers_info {
+  int32_t has_ground; /* the ground layer has been made */
+  int32_t has_guidance;
+  int32_t done;        /* no unknown hole left worth looking at */
+  double unknown_area; /* m^2 of unknown ground, over all targets */
+  size_t boundary_vertex_count;
+  size_t feature_count;
+  size_t target_count;
+  size_t spot_count;
+  size_t edit_count;
+} vg_site_layers_info;
+
+/* Reads the layers of the site in dir (none made yet: all empty). Open again
+ * after a job changes them. Strings and arrays below belong to the handle
+ * and live until it's freed. */
+VG_API vg_status vg_site_layers_open(const char* dir, vg_site_layers** out);
+VG_API void vg_site_layers_free(vg_site_layers* layers);
+VG_API vg_status vg_site_layers_get_info(const vg_site_layers* layers, vg_site_layers_info* out);
+/* One of the ground layer's grids (VG_GROUND_GRID_*), as a new grid: free it
+ * with vg_grid_free. VG_ERROR_FAILED if the ground layer isn't made. */
+VG_API vg_status vg_site_layers_ground_grid(const vg_site_layers* layers, int32_t which,
+                                            vg_grid** out);
+/* The site's boundary, counter-clockwise (count 0 with no boundary walk). */
+VG_API vg_status vg_site_layers_boundary(const vg_site_layers* layers,
+                                         const vg_boundary_vertex** vertices, size_t* count);
+VG_API vg_status vg_site_layers_features(const vg_site_layers* layers, const vg_feature** features,
+                                         size_t* count);
+/* Targets in visiting order; spots as indexed by the targets. */
+VG_API vg_status vg_site_layers_guidance(const vg_site_layers* layers,
+                                         const vg_guidance_target** targets, size_t* target_count,
+                                         const vg_look_spot** spots, size_t* spot_count);
+/* Area edits, then boundary lines, each in the order made. */
+VG_API vg_status vg_site_layers_edits(const vg_site_layers* layers, const vg_site_edit** edits,
+                                      size_t* count);
+
 /* ===== Pipeline jobs (include/vg_core/config/jobs.hpp) ================= */
 
 /* Each job takes settings as command-line arguments, applied in order over
@@ -418,6 +554,22 @@ VG_API vg_status vg_site_add(const char* site_dir, const char* const* package_di
 /* vg site maps. */
 VG_API vg_status vg_site_make_maps(const char* site_dir, const char* const* settings,
                                    size_t settings_count, vg_log_fn log, void* user_data);
+/* vg site ground: remakes the site's layers (ground, boundary, features,
+ * guidance) from its walks and edits. Since API version 2. */
+VG_API vg_status vg_site_make_ground(const char* site_dir, const char* const* settings,
+                                     size_t settings_count, vg_log_fn log, void* user_data);
+/* vg site edit: adds an edit (kind VG_EDIT_*; points x0, y0, x1, y1, ... in
+ * the site frame: an area of 3 or more, a boundary line of 2 or more; note
+ * one line, may be NULL), then remakes the layers. The new edit's id
+ * ("edit-N") is copied to id (may be NULL) if it fits in id_size bytes with
+ * its terminating NUL. Since API version 2. */
+VG_API vg_status vg_site_add_edit(const char* site_dir, int32_t kind, const double* points,
+                                  size_t point_count, const char* note, char* id, size_t id_size,
+                                  vg_log_fn log, void* user_data);
+/* vg site delete-edit: takes the edit out, then remakes the layers.
+ * VG_ERROR_CONFIG if the site has no such edit. Since API version 2. */
+VG_API vg_status vg_site_delete_edit(const char* site_dir, const char* id, vg_log_fn log,
+                                     void* user_data);
 
 #ifdef __cplusplus
 }

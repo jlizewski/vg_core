@@ -509,4 +509,72 @@ TEST(CApi, RunsThePipelineFromARecording) {
                                           std::filesystem::u8path(package)));
   EXPECT_EQ(vg_site_get_visit(site, 1, &visit), VG_ERROR_INVALID_ARGUMENT);
   vg_site_free(site);
+
+  // Its layers, as made with the site's maps.
+  vg_site_layers* layers = nullptr;
+  ASSERT_EQ(vg_site_layers_open(site_dir.c_str(), &layers), VG_OK) << vg_last_error();
+  vg_site_layers_info info{};
+  ASSERT_EQ(vg_site_layers_get_info(layers, &info), VG_OK);
+  EXPECT_EQ(info.has_ground, 1);
+  EXPECT_EQ(info.has_guidance, 1);
+  EXPECT_EQ(info.boundary_vertex_count, 0u);  // Not a boundary walk.
+  EXPECT_EQ(info.edit_count, 0u);
+  vg_grid* state = nullptr;
+  ASSERT_EQ(vg_site_layers_ground_grid(layers, VG_GROUND_GRID_STATE, &state), VG_OK)
+      << vg_last_error();
+  vg_grid_info grid{};
+  ASSERT_EQ(vg_grid_get_info(state, &grid), VG_OK);
+  std::size_t measured = 0;
+  const float* values = vg_grid_values(state);
+  for (int32_t i = 0; i < grid.width * grid.height; ++i) {
+    measured += values[i] == static_cast<float>(VG_GROUND_MEASURED) ? 1 : 0;
+  }
+  EXPECT_GT(measured, 0u);
+  vg_grid_free(state);
+  EXPECT_EQ(vg_site_layers_ground_grid(layers, 9, &state), VG_ERROR_INVALID_ARGUMENT);
+  const vg_guidance_target* targets = nullptr;
+  const vg_look_spot* spots = nullptr;
+  std::size_t target_count = 0;
+  std::size_t spot_count = 0;
+  ASSERT_EQ(vg_site_layers_guidance(layers, &targets, &target_count, &spots, &spot_count), VG_OK);
+  EXPECT_EQ(target_count, info.target_count);
+  for (std::size_t t = 0; t < target_count; ++t) {
+    EXPECT_EQ(targets[t].order, static_cast<int32_t>(t + 1));  // Visiting order.
+    EXPECT_LE(targets[t].first_spot + targets[t].spot_count, spot_count);
+  }
+  vg_site_layers_free(layers);
+
+  // An edit: something stands on part of the ground. It's made, then deleted.
+  const double area[] = {-0.2, -0.2, 0.3, -0.2, 0.3, 0.3, -0.2, 0.3};
+  char id[16] = "x";
+  ASSERT_EQ(vg_site_add_edit(site_dir.c_str(), VG_EDIT_NOT_GROUND, area, 4, "a leaf pile", id,
+                             sizeof id, nullptr, nullptr),
+            VG_OK)
+      << vg_last_error();
+  EXPECT_STREQ(id, "edit-1");
+  EXPECT_EQ(vg_site_add_edit(site_dir.c_str(), VG_EDIT_NOT_GROUND, area, 2, nullptr, nullptr, 0,
+                             nullptr, nullptr),
+            VG_ERROR_CONFIG);  // Too few points for an area.
+  EXPECT_EQ(vg_site_add_edit(site_dir.c_str(), 7, area, 4, nullptr, nullptr, 0, nullptr, nullptr),
+            VG_ERROR_INVALID_ARGUMENT);
+  ASSERT_EQ(vg_site_layers_open(site_dir.c_str(), &layers), VG_OK) << vg_last_error();
+  const vg_site_edit* edits = nullptr;
+  std::size_t edit_count = 0;
+  ASSERT_EQ(vg_site_layers_edits(layers, &edits, &edit_count), VG_OK);
+  ASSERT_EQ(edit_count, 1u);
+  EXPECT_STREQ(edits[0].id, "edit-1");
+  EXPECT_EQ(edits[0].kind, VG_EDIT_NOT_GROUND);
+  EXPECT_STREQ(edits[0].note, "a leaf pile");
+  ASSERT_EQ(edits[0].point_count, 4u);
+  EXPECT_DOUBLE_EQ(edits[0].points[2], 0.3);
+  EXPECT_EQ(edits[0].reviewed, 1);
+  EXPECT_GT(edits[0].cells, 0u);
+  vg_site_layers_free(layers);
+  ASSERT_EQ(vg_site_delete_edit(site_dir.c_str(), "edit-1", nullptr, nullptr), VG_OK)
+      << vg_last_error();
+  EXPECT_EQ(vg_site_delete_edit(site_dir.c_str(), "edit-1", nullptr, nullptr), VG_ERROR_CONFIG);
+  ASSERT_EQ(vg_site_layers_open(site_dir.c_str(), &layers), VG_OK);
+  ASSERT_EQ(vg_site_layers_get_info(layers, &info), VG_OK);
+  EXPECT_EQ(info.edit_count, 0u);
+  vg_site_layers_free(layers);
 }

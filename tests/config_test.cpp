@@ -254,6 +254,15 @@ TEST(Jobs, AddSiteEditWritesTheLayersEditsAndRemakesThem) {
   }
   EXPECT_EQ(vg::load_ground_edits(ground).size(), 2u);
   EXPECT_EQ(vg::load_ground_edits(boundary).size(), 1u);
+
+  // Deleting takes the edit out of whichever layer has it; ids aren't reused.
+  vg::config::delete_site_edit(site, "edit-2", log);
+  EXPECT_TRUE(vg::load_ground_edits(boundary).empty());
+  vg::config::delete_site_edit(site, "edit-1", log);
+  ASSERT_EQ(vg::load_ground_edits(ground).size(), 1u);
+  EXPECT_EQ(vg::load_ground_edits(ground)[0].id, "edit-3");
+  EXPECT_THROW(vg::config::delete_site_edit(site, "edit-1", log), ConfigError);
+  EXPECT_EQ(vg::config::add_site_edit(site, "ground", "0 0;1 0;1 1", "", log), "edit-4");
   fs::remove_all(site);
 }
 

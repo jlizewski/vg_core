@@ -46,6 +46,7 @@ int usage(const vg::config::ParamSet& params) {
                "       vg_site maps <site_dir>\n"
                "       vg_site ground <site_dir>\n"
                "       vg_site edit <site_dir> ground|not_ground|boundary \"x y;x y;...\" [note]\n"
+               "       vg_site delete-edit <site_dir> <edit_id>\n"
                "       vg_site list <site_dir>\n"
             << params.flags_help();
   return 2;
@@ -82,6 +83,21 @@ int main(int argc, char** argv) {
   }
   const std::string command = args[0];
   const std::filesystem::path site_dir = args[1];
+  if (command == "delete-edit") {
+    if (args.size() != 3) {
+      return usage(params);
+    }
+    try {
+      vg::config::delete_site_edit(site_dir, args[2], std::cout);
+      return 0;
+    } catch (const vg::config::ConfigError& e) {
+      std::cerr << "vg_site: " << e.what() << "\n";
+      return 2;
+    } catch (const std::exception& e) {
+      std::cerr << "vg_site: " << e.what() << "\n";
+      return 1;
+    }
+  }
   if (command == "edit") {
     if (args.size() < 4) {
       return usage(params);

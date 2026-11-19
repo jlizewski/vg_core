@@ -16,7 +16,8 @@ over the C++ library. Decision: [D11](decisions.md#d11-a-c-api-for-the-app-bindi
 | 2D maps | `vg_grid_*` | Showing any `.asc` map: ground, sun hours, ... |
 | Packages | `vg_package_*` | The 3D voxel view, where a walk is on the Earth |
 | Sites | `vg_site_*` | Listing a site's walks and how they lined up |
-| Pipeline jobs | `vg_replay`, `vg_map_stages`, `vg_site_add`, `vg_site_make_maps` | Building maps after a walk; re-tuning them |
+| Site layers | `vg_site_layers_*` | The ground's states and grids, the boundary, feature elements, ground-fill guidance and the user's edits with their reviews: what guided mapping shows over the site |
+| Pipeline jobs | `vg_replay`, `vg_map_stages`, `vg_site_add`, `vg_site_make_maps`, `vg_site_make_ground`, `vg_site_add_edit`, `vg_site_delete_edit` | Building maps after a walk; re-tuning them; correcting a site's layers |
 
 The jobs are the same code the command-line apps run: `vg replay`, `vg map`
 and `vg site` call the functions in
@@ -67,7 +68,8 @@ in the [capture format](capture-format.md#conventions).
 `vg_api_version()` from the library. Check it at start-up. The number goes up
 whenever a declaration changes in a way that breaks existing callers.
 Version 2 (2026-11-19) added `session_type` and `tracking_frame` to
-`vg_session_info` (a layout change) and `vg_recorder_write_magnetometer`.
+`vg_session_info` (a layout change) and `vg_recorder_write_magnetometer`,
+then the site layers (`vg_site_layers_*`) and their jobs.
 
 ## Examples
 
@@ -153,6 +155,39 @@ vg_grid_range(sun, &lo, &hi, NULL);        // for the color scale
 vg_grid_free(sun);
 ```
 
+### Guided mapping: a site's layers
+
+```c
+// After a step of a mapping run (on a worker thread):
+vg_site_add(site_dir, &package_dir, 1, 0, NULL, 0, on_log_line, ctx, NULL);  // remakes the layers
+
+vg_site_layers* layers = NULL;
+vg_site_layers_open(site_dir, &layers);
+vg_site_layers_info info;
+vg_site_layers_get_info(layers, &info);   // info.done: the ground is finished
+
+vg_grid* state = NULL;                    // VG_GROUND_MEASURED, _FILLED, _COVERED, _UNKNOWN
+vg_site_layers_ground_grid(layers, VG_GROUND_GRID_STATE, &state);
+
+const vg_guidance_target* targets; const vg_look_spot* spots;
+size_t target_count, spot_count;
+vg_site_layers_guidance(layers, &targets, &target_count, &spots, &spot_count);
+for (size_t t = 0; t < target_count; ++t) {            // in visiting order
+  for (size_t k = 0; k < targets[t].spot_count; ++k) {
+    const vg_look_spot* s = &spots[targets[t].first_spot + k];
+    show_spot(s->x, s->y, s->heading);                  // stand here, face this way
+  }
+}
+vg_grid_free(state);
+vg_site_layers_free(layers);              // strings and arrays above go with it
+
+// The user marks a leaf pile: not ground. Remakes the layers; open them again.
+const double pile[] = {1.0, 2.0, 2.5, 2.0, 2.5, 3.0, 1.0, 3.0};  // x, y pairs, site frame
+char id[32];
+vg_site_add_edit(site_dir, VG_EDIT_NOT_GROUND, pile, 4, "leaf pile", id, sizeof id, NULL, NULL);
+vg_site_delete_edit(site_dir, id, NULL, NULL);  // and taking it back
+```
+
 Jobs take settings exactly as the command line does (`--config FILE`,
 `--set PATH=VALUE`, or a short flag), so anything in
 [config/mapping.yaml](../config/mapping.yaml) can be changed from an app.
@@ -207,9 +242,11 @@ cmake --build --preset debug --target vg_core_c
 | [src/c_api/recorder.cpp](../src/c_api/recorder.cpp) | `vg_recorder_*` over `io::SessionWriter` |
 | [src/c_api/map_builder.cpp](../src/c_api/map_builder.cpp) | `vg_map_builder_*` over `MapBuilder` and `PoseJumpFilter` |
 | [src/c_api/maps.cpp](../src/c_api/maps.cpp) | Grids, packages, sites |
+| [src/c_api/layers.cpp](../src/c_api/layers.cpp) | `vg_site_layers_*` over `load_site_layers`, and the layers' jobs |
 | [src/c_api/pipeline.cpp](../src/c_api/pipeline.cpp) | The jobs, over [config/jobs.hpp](../include/vg_core/config/jobs.hpp) |
 | [tests/c_api_test.cpp](../tests/c_api_test.cpp) | Every area end to end on a synthetic yard: record, live map, replay, stages, site |
 | [tests/c_api_header_check.c](../tests/c_api_header_check.c) | Compiles the header as C |
+| [tools/tests/test_c_api_layers.py](../tools/tests/test_c_api_layers.py) | The site layers through `ctypes`, against what the dashboard reads from the files |
 
 Each function follows the same shape: `guard([&] { require(...); convert;
 call C++; write outputs; })`. To add one, declare it in the header with

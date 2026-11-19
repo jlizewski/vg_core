@@ -347,19 +347,14 @@ def start_site_edit(ws: Workspace, jobs: Jobs, site: str, kind: str, points: lis
 
 
 def delete_site_edit(ws: Workspace, jobs: Jobs, site: str, edit_id: str) -> Job:
-    """Takes an edit out of its layer's edits.csv, then remakes the layers."""
+    """vg site delete-edit: takes an edit out of its layer, then remakes the layers."""
     base = ws.site(site)
     if not re.match(r"^[A-Za-z0-9._-]{1,40}$", edit_id):
         raise ValueError(f"bad edit id {edit_id!r}")
     for layer in ("ground", "boundary"):
-        path = base / "layers" / layer / "edits.csv"
-        if not path.is_file():
-            continue
-        lines = path.read_text().splitlines()
-        kept = [line for line in lines[1:] if line.split(",", 1)[0] != edit_id]
-        if len(kept) < len(lines) - 1:
-            path.write_text("\n".join([lines[0], *kept]) + "\n")
-            return jobs.submit(f"delete edit {edit_id} from {site}", ["site", "ground", str(base)])
+        if any(e["id"] == edit_id for e in _read_edits(base / "layers" / layer / "edits.csv")):
+            return jobs.submit(f"delete edit {edit_id} from {site}",
+                               ["site", "delete-edit", str(base), edit_id])
     raise ValueError(f"no edit {edit_id!r} in {site}")
 
 

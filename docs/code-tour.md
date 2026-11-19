@@ -89,6 +89,7 @@ See [pipeline/sites.md](pipeline/sites.md).
 | [boundary.hpp](../include/vg_core/boundary.hpp) | The site's boundary from a boundary walk: the loop and its drift, pushed out to the edge; boundary edits. |
 | [features.hpp](../include/vg_core/features.hpp) | Feature elements (posts, lines, blocks) from each walk, matched across walks and retired when missed. |
 | [guidance.hpp](../include/vg_core/guidance.hpp) | `plan_guidance`: the unknown holes in the ground, where to stand to see each, and when the ground is done. |
+| [site_layers.hpp](../include/vg_core/site_layers.hpp) | `load_site_layers`: a site's layers read back from disk (boundary, features, guidance, edits and reviews), for the apps. |
 | [surface_mesh.hpp](../include/vg_core/surface_mesh.hpp) | Grids as triangle meshes, written as glTF (`model.glb`). |
 
 ### Files
@@ -123,7 +124,7 @@ In [include/vg_core/config/](../include/vg_core/config/).
 | --- | --- |
 | `config/mapping_config.hpp` | `MappingConfig`: every pipeline setting in one struct; the YAML sections. |
 | `config/params.hpp` | Binding settings to YAML paths and command-line flags. |
-| `config/jobs.hpp` | The pipeline jobs as functions: `replay`, `rerun_stages`, `add_to_site`, `make_site_maps`, `make_site_ground`, `add_site_edit`. The command-line apps and the C API both call these. |
+| `config/jobs.hpp` | The pipeline jobs as functions: `replay`, `rerun_stages`, `add_to_site`, `make_site_maps`, `make_site_ground`, `add_site_edit`, `delete_site_edit`. The command-line apps and the C API both call these. |
 
 [config/mapping.yaml](../config/mapping.yaml) lists every setting with its
 default and an explanation. It's generated (`vg config defaults`); regenerate
@@ -143,7 +144,7 @@ In [apps/](../apps/); run as `vg <name>` through the Python CLI.
 | --- | --- |
 | `vg replay` | Recording → full map package. |
 | `vg map` | Re-run stages of a package from its saved 3D map. |
-| `vg site` | Add walks to a site, make its current maps and layers, add an edit, list visits. |
+| `vg site` | Add walks to a site, make its current maps and layers, add or delete an edit, list visits. |
 | `vg segment` | Relabel a recording's depth with a model on the PC. |
 | `vg mcap stats` | What a recording holds, and how good its poses and depth look. |
 | `vg mcap repair` | Index an unclosed recording. |

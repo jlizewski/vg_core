@@ -12,6 +12,7 @@
 #include "vg_core/height_map_io.hpp"
 #include "vg_core/map_package.hpp"
 #include "vg_core/semantics.hpp"
+#include "vg_core/site_layers.hpp"
 
 namespace {
 
@@ -271,6 +272,23 @@ TEST_F(SiteTest, MakesTheBoundaryFromABoundaryWalk) {
   EXPECT_GT(inside, 0u);
   const double cell = layer.heights.cell_size;
   EXPECT_LT(static_cast<double>(inside) * cell * cell, 7.0);  // Within ~2.5 x 2.5 m.
+
+  // Read back as the apps see it.
+  const vg::SiteLayers read = vg::load_site_layers(root_ / "site");
+  EXPECT_TRUE(read.has_ground);
+  EXPECT_TRUE(read.has_guidance);
+  ASSERT_EQ(read.boundary.size(), layer.boundary.size());
+  for (std::size_t i = 0; i < read.boundary.size(); ++i) {
+    EXPECT_NEAR((read.boundary[i].position - layer.boundary[i]).norm(), 0.0, 1e-6) << i;
+  }
+}
+
+TEST(SiteLayersTest, ASiteWithNoLayersHasNone) {
+  const vg::SiteLayers none = vg::load_site_layers(fs::temp_directory_path() / "vg_no_such_site");
+  EXPECT_FALSE(none.has_ground);
+  EXPECT_FALSE(none.has_guidance);
+  EXPECT_TRUE(none.boundary.empty() && none.features.empty() && none.edits.empty());
+  EXPECT_TRUE(none.guidance.targets.empty());
 }
 
 TEST_F(SiteTest, EditsSurviveAddingAWalkAndLaterWalksAreReviewed) {
@@ -309,6 +327,33 @@ TEST_F(SiteTest, EditsSurviveAddingAWalkAndLaterWalksAreReviewed) {
   EXPECT_NE(read_all(root_ / "site" / vg::ground_layer_file::kDir / vg::ground_layer_file::kEditReviews)
                 .find("edit-1,not_ground,"),
             std::string::npos);
+
+  // Read back as the apps see it: the edit, its review, the features.
+  const vg::FeatureLayer features = site.make_feature_layer(log_);
+  const vg::SiteLayers read = vg::load_site_layers(root_ / "site");
+  ASSERT_EQ(read.edits.size(), 1u);
+  EXPECT_EQ(read.edits[0].id, "edit-1");
+  EXPECT_EQ(read.edits[0].kind, vg::GroundEdit::Kind::NotGround);
+  ASSERT_EQ(read.reviews.size(), 1u);
+  EXPECT_EQ(read.reviews[0].cells, two.reviews[0].cells);
+  EXPECT_EQ(read.reviews[0].disagreeing, two.reviews[0].disagreeing);
+  EXPECT_EQ(read.reviews[0].walks, two.reviews[0].walks);
+  ASSERT_EQ(read.features.size(), features.elements.size());
+  for (std::size_t i = 0; i < read.features.size(); ++i) {
+    const vg::SiteFeature& a = read.features[i];
+    const vg::SiteFeature& b = features.elements[i];
+    EXPECT_EQ(a.id, b.id);
+    EXPECT_EQ(a.feature.kind, b.feature.kind);
+    EXPECT_NEAR((a.feature.center - b.feature.center).norm(), 0.0, 1e-6);
+    EXPECT_NEAR(a.feature.axis, b.feature.axis, 1e-6);
+    EXPECT_EQ(a.seen, b.seen);
+    EXPECT_EQ(a.retired, b.retired);
+  }
+  EXPECT_TRUE(read.has_guidance);
+  for (const vg::GuidanceTarget& t : read.guidance.targets) {
+    EXPECT_GT(t.area, 0.0);
+    EXPECT_GT(t.order, 0);
+  }
 }
 
 TEST(SiteModelTest, ColorsTheSurfaceAndHangsTheCanopyOverTheTerrain) {
