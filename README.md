@@ -32,6 +32,11 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
+The same commands work in Windows PowerShell, with Visual Studio 2022 or later
+("Desktop development with C++") and CMake on `PATH`; the build then makes
+Visual Studio projects, and binaries land under `build\debug\Debug\` (and
+`build\release\Release\`).
+
 Eigen 3.4 and GoogleTest are used from the system if found, otherwise fetched at
 configure time. `vg_core_io` also fetches zstd and the MCAP C++ library; turn it
 off with `-DVG_CORE_BUILD_IO=OFF` to build only the mapping library.
@@ -595,10 +600,24 @@ with the camera image beside it. Coming from RViz:
 
 ## Development tools (Python ≥ 3.10)
 
+Linux and macOS:
+
 ```sh
 python -m venv .venv && source .venv/bin/activate
 pip install -e "tools[dev]"
+```
 
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1   # each new terminal; cmd.exe: .venv\Scripts\activate.bat
+pip install -e "tools[dev]"
+```
+
+Then, on either:
+
+```sh
 vg build            # configure + build (debug preset)
 vg test             # build and run C++ tests
 vg format [--check] # clang-format C++ sources
@@ -634,6 +653,34 @@ app is rebuilt (incrementally) in the release build, configuring it if needed,
 since a debug build of the mapping is many times slower; `--vg-preset NAME`
 picks another build and `--vg-no-build` skips the rebuild. After `vg replay`
 and `vg map`, the package's maps are rendered as PNG previews.
+
+### On Windows (PowerShell)
+
+Every `vg` command in this README runs as written in PowerShell; paths may
+use `\` or `/`. What differs is the shell around it:
+
+| | bash | PowerShell |
+| --- | --- | --- |
+| Use the virtual environment | `source .venv/bin/activate` | `.\.venv\Scripts\Activate.ps1` |
+| `vg` isn't found | | `python -m vg_tools.cli ...` runs the same thing, with no activation or `PATH` needed (the Python that `pip install -e` used) |
+| One command, then another if it worked | `vg build && vg test` | `vg build; if ($?) { vg test }` (PowerShell 7: `&&` works) |
+| Set a variable for this terminal | `export VG_FOXGLOVE=/opt/foxglove/foxglove` | `$env:VG_FOXGLOVE = "C:\path\to\Foxglove.exe"` |
+| Continue a long command on the next line | `\` at the end | `` ` `` at the end |
+| Every recording in a folder | `for f in recs/*.vgcap.mcap; do vg mcap stats "$f"; done` | `Get-ChildItem recs\*.vgcap.mcap \| ForEach-Object { vg mcap stats $_.FullName }` |
+
+If `Activate.ps1` is refused ("running scripts is disabled on this system"),
+PowerShell's execution policy blocks it: allow your own scripts with
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or skip activation and
+use `python -m vg_tools.cli`. If `pip install` put `vg.exe` in a `Scripts`
+folder that isn't on `PATH` (pip warns), add that folder to `PATH` or use
+`python -m vg_tools.cli` the same way.
+
+For example, the dashboard on this workspace's sites:
+
+```powershell
+cd C:\path\to\vg_ws\vg_core
+python -m vg_tools.cli dashboard --recordings ..\vg_sites\recordings --sites ..\vg_sites
+```
 
 ## License
 
