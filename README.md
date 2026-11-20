@@ -23,6 +23,7 @@ on any platform.
 | `tools/` | Python development tools (`vg` CLI) |
 | `docs/` | [Documentation](docs/README.md): vision, architecture, how each pipeline stage works, file formats, designs, decisions, roadmap |
 | `schemas/` | Protobuf schemas for vg-specific capture messages |
+| `TODO.md` | [The working list](TODO.md): what's waiting on someone, and what's next on the active plan |
 
 ## Building (C++17, CMake ≥ 3.20)
 
