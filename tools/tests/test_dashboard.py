@@ -284,3 +284,19 @@ def test_foxglove_can_be_named(monkeypatch):
     assert foxglove.find() == ["/opt/fox/foxglove"]
     assert foxglove.LAYOUT.is_file()
     assert "3D!vgwalk" in json.loads(foxglove.LAYOUT.read_text())["configById"]
+
+
+def test_foxglove_starts_without_electrons_settings(monkeypatch, tmp_path: Path):
+    # From a terminal in VS Code, ELECTRON_RUN_AS_NODE=1 would make Foxglove
+    # (an Electron app) run the .mcap file as a Node.js script and exit.
+    from vg_tools import foxglove
+
+    monkeypatch.setenv("VG_FOXGLOVE", "/opt/fox/foxglove")
+    monkeypatch.setenv("ELECTRON_RUN_AS_NODE", "1")
+    started = {}
+    monkeypatch.setattr(foxglove.subprocess, "Popen",
+                        lambda args, **kw: started.update(args=args, env=kw["env"]))
+    assert "opened" in foxglove.open_file(tmp_path / "walk.mcap")
+    assert started["args"][0] == "/opt/fox/foxglove"
+    assert "ELECTRON_RUN_AS_NODE" not in started["env"]
+    assert started["env"]["VG_FOXGLOVE"] == "/opt/fox/foxglove"  # The rest is kept.

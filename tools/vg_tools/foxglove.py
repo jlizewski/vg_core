@@ -73,15 +73,25 @@ def _mcap_has_an_app() -> bool:
         return False
 
 
+def app_environment() -> dict[str, str]:
+    """This process's environment without Electron's settings. Foxglove is an
+    Electron app, and a terminal inside VS Code (itself Electron) passes on
+    ELECTRON_RUN_AS_NODE=1, which makes Foxglove run as plain Node.js: it
+    then tries to run the .mcap file as a script and exits."""
+    return {k: v for k, v in os.environ.items() if not k.upper().startswith("ELECTRON_")}
+
+
 def open_file(path: Path) -> str:
     """Opens path in Foxglove; what happened, for a log."""
     command = find()
     if command is not None:
-        subprocess.Popen([*command, str(path)], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL)
+        subprocess.Popen([*command, str(path)], env=app_environment(),
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return f"opened {path} in Foxglove"
     if sys.platform == "win32" and _mcap_has_an_app():
-        try:  # Whatever .mcap files open with.
+        try:  # Whatever .mcap files open with; it inherits this environment.
+            for name in [k for k in os.environ if k.upper().startswith("ELECTRON_")]:
+                del os.environ[name]
             os.startfile(path)  # type: ignore[attr-defined]
             return f"opened {path} with the app for .mcap files"
         except OSError:
