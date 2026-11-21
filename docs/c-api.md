@@ -12,6 +12,7 @@ over the C++ library. Decision: [D11](decisions.md#d11-a-c-api-for-the-app-bindi
 | --- | --- | --- |
 | Library | `vg_api_version`, `vg_version_string`, `vg_last_error` | Everyone |
 | Recording | `vg_recorder_*` | Capture plugins: write a recording in the [capture format](capture-format.md), including guided mapping's session type, tracking frame and magnetometer (format 0.2) |
+| Reading recordings | `vg_session_*` | A recording's session info without its frames: what it's for, which tracking session made it, how long it is, whether it was closed |
 | Live map | `vg_map_builder_*` | The phone's live preview while walking |
 | 2D maps | `vg_grid_*` | Showing any `.asc` map: ground, sun hours, ... |
 | Packages | `vg_package_*` | The 3D voxel view, where a walk is on the Earth |
@@ -69,7 +70,8 @@ in the [capture format](capture-format.md#conventions).
 whenever a declaration changes in a way that breaks existing callers.
 Version 2 (2026-11-19) added `session_type` and `tracking_frame` to
 `vg_session_info` (a layout change) and `vg_recorder_write_magnetometer`,
-then the site layers (`vg_site_layers_*`) and their jobs.
+then the site layers (`vg_site_layers_*`) and their jobs, and reading a
+recording's session info (`vg_session_*`).
 
 ## Examples
 
@@ -240,6 +242,7 @@ cmake --build --preset debug --target vg_core_c
 | [src/c_api/common.hpp](../src/c_api/common.hpp) | Exception-to-status `guard`, struct conversions, the log adapter |
 | [src/c_api/library.cpp](../src/c_api/library.cpp) | Version, errors, conversions |
 | [src/c_api/recorder.cpp](../src/c_api/recorder.cpp) | `vg_recorder_*` over `io::SessionWriter` |
+| [src/c_api/session.cpp](../src/c_api/session.cpp) | `vg_session_*` over `io::SessionReader` |
 | [src/c_api/map_builder.cpp](../src/c_api/map_builder.cpp) | `vg_map_builder_*` over `MapBuilder` and `PoseJumpFilter` |
 | [src/c_api/maps.cpp](../src/c_api/maps.cpp) | Grids, packages, sites |
 | [src/c_api/layers.cpp](../src/c_api/layers.cpp) | `vg_site_layers_*` over `load_site_layers`, and the layers' jobs |

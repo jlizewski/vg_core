@@ -148,7 +148,8 @@ if(VG_CORE_BUILD_IO)
       src/c_api/map_builder.cpp
       src/c_api/maps.cpp
       src/c_api/pipeline.cpp
-      src/c_api/recorder.cpp)
+      src/c_api/recorder.cpp
+      src/c_api/session.cpp)
     if(VG_CORE_C_SHARED)
       add_library(vg_core_c SHARED ${_vg_core_c_sources})
       # Consumers on Windows import the functions from the DLL.

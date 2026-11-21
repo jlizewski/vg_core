@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <variant>
 #include <vector>
@@ -289,6 +290,36 @@ TEST(CApi, RecordsASessionTheReaderReadsBack) {
     }
   }
   EXPECT_EQ(seen, 511);
+
+  // Its session info, read back without the frames.
+  vg_session* session = nullptr;
+  ASSERT_EQ(vg_session_open(utf8(file).c_str(), &session), VG_OK) << vg_last_error();
+  vg_session_summary summary{};
+  ASSERT_EQ(vg_session_get_summary(session, &summary), VG_OK);
+  EXPECT_STREQ(summary.format_version, "0.2");
+  EXPECT_STREQ(summary.info.producer, "vg_core tests");
+  EXPECT_STREQ(summary.info.device_model, "");  // Not given: "", not NULL.
+  EXPECT_STREQ(summary.info.session_type, VG_SESSION_BOUNDARY_WALK);
+  EXPECT_STREQ(summary.info.tracking_frame, info.tracking_frame);
+  EXPECT_EQ(summary.info.utc_offset_ns, info.utc_offset_ns);
+  EXPECT_EQ(summary.indexed, 1);
+  ASSERT_EQ(summary.has_time_range, 1);
+  EXPECT_LE(summary.first_ns, 6 * kMs);
+  EXPECT_EQ(summary.last_ns, 14 * kMs);
+  vg_session_free(session);
+}
+
+TEST(CApi, RefusesToReadWhatIsntARecording) {
+  TempDir dir("vg_c_api_not_a_session");
+  const auto file = dir.path() / "notes.txt";
+  std::ofstream(file) << "not a recording\n";
+  vg_session* session = nullptr;
+  EXPECT_EQ(vg_session_open(utf8(file).c_str(), &session), VG_ERROR_FAILED);
+  EXPECT_EQ(session, nullptr);
+  EXPECT_EQ(vg_session_open(utf8(dir.path() / "missing.mcap").c_str(), &session),
+            VG_ERROR_FAILED);
+  EXPECT_EQ(vg_session_open(nullptr, &session), VG_ERROR_INVALID_ARGUMENT);
+  vg_session_free(nullptr);
 }
 
 TEST(CApi, RecordsAFreeWalkAndRefusesUnknownSessionTypes) {

@@ -225,6 +225,29 @@ VG_API vg_status vg_recorder_close(vg_recorder* recorder);
  * vg_recorder_close first to see them) and frees the handle. */
 VG_API void vg_recorder_free(vg_recorder* recorder);
 
+/* ===== Reading a recording's session info ============================== */
+
+/* A recording's session info, read without its frames: for listing
+ * recordings by what they're for and which tracking session made them.
+ * Since API version 2. */
+typedef struct vg_session vg_session;
+
+typedef struct vg_session_summary {
+  const char* format_version; /* capture format, e.g. "0.2" */
+  vg_session_info info;       /* strings never NULL ("" when unset) */
+  int32_t indexed;            /* 0: never closed (cut short); vg mcap repair fixes it */
+  int32_t has_time_range;     /* from the index: 0 when not indexed */
+  int64_t first_ns;           /* first and last message, session clock */
+  int64_t last_ns;
+} vg_session_summary;
+
+/* Opens the recording at path and reads its session info.
+ * VG_ERROR_FAILED if it can't be read or isn't a capture session. */
+VG_API vg_status vg_session_open(const char* path, vg_session** out);
+VG_API void vg_session_free(vg_session* session);
+/* Strings belong to the handle and live until it's freed. */
+VG_API vg_status vg_session_get_summary(const vg_session* session, vg_session_summary* out);
+
 /* ===== Building a map live (include/vg_core/map_builder.hpp) =========== */
 
 typedef struct vg_map_builder vg_map_builder;
