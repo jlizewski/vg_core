@@ -275,6 +275,10 @@ typedef struct vg_map_builder_config {
   const char* deferred_path;   /* spool file for deferred frames; NULL: memory */
   /* Undo the tracker's pose jumps (pose_jumps.hpp), as vg replay does. */
   int32_t remove_pose_jumps;
+  /* Since API version 2. Drop depth frames that aren't keyframes instead of
+   * deferring them, when only the live map is wanted (live guidance): the
+   * defaults keep them (0). */
+  int32_t drop_non_keyframes;
 } vg_map_builder_config;
 
 /* Fills config with the settings vg replay uses by default
