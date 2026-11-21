@@ -38,6 +38,21 @@ The same commands work in Windows PowerShell, with Visual Studio 2022 or later
 Visual Studio projects, and binaries land under `build\debug\Debug\` (and
 `build\release\Release\`).
 
+The command-line apps also build for an Android phone with the NDK, to run
+the pipeline there over `adb` (how fast is it on a phone?). PowerShell, with
+the Android SDK's NDK and its Ninja:
+
+```powershell
+$sdk = "$env:LOCALAPPDATA\Android\Sdk"; $ndk = "$sdk\ndk\28.2.13676358"
+cmake -S . -B build/android-arm64 -G Ninja -DCMAKE_MAKE_PROGRAM="$sdk\cmake\3.22.1\bin\ninja.exe" `
+  -DCMAKE_TOOLCHAIN_FILE="$ndk\build\cmake\android.toolchain.cmake" -DANDROID_ABI=arm64-v8a `
+  -DANDROID_PLATFORM=android-24 -DCMAKE_BUILD_TYPE=Release -DVG_CORE_BUILD_APPS=ON `
+  -DVG_CORE_BUILD_TESTS=OFF -DVG_CORE_BUILD_ONNX=OFF -DVG_CORE_C_SHARED=OFF
+cmake --build build/android-arm64 --target vg_replay vg_site
+& "$ndk\toolchains\llvm\prebuilt\windows-x86_64\bin\llvm-strip.exe" -o vg_site build/android-arm64/vg_site
+adb push vg_site /data/local/tmp/vg/      # then: adb shell /data/local/tmp/vg/vg_site ...
+```
+
 Eigen 3.4 and GoogleTest are used from the system if found, otherwise fetched at
 configure time. `vg_core_io` also fetches zstd and the MCAP C++ library; turn it
 off with `-DVG_CORE_BUILD_IO=OFF` to build only the mapping library.

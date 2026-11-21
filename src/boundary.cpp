@@ -265,8 +265,10 @@ Boundary estimate_boundary(const std::vector<Eigen::Vector2d>& path, const Groun
     for (int k = -half; k <= half; ++k) {
       window.push_back(found[(j + m + static_cast<std::size_t>(k + static_cast<int>(m))) % m]);
     }
-    std::nth_element(window.begin(), window.begin() + half, window.end(),
-                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    // Ties broken by edge, so equal pushes found different ways give the same
+    // median with every standard library (nth_element's order among equals
+    // isn't specified: MSVC and libc++ picked differently).
+    std::nth_element(window.begin(), window.begin() + half, window.end());
     BoundaryVertex v;
     v.push = window[static_cast<std::size_t>(half)].first;
     v.edge = window[static_cast<std::size_t>(half)].second;

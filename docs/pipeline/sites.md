@@ -301,6 +301,30 @@ Apps read the layers through the C API (`vg_site_layers_*`, built on
 [site_layers.hpp](../../include/vg_core/site_layers.hpp)) and make and delete
 edits with its jobs; see [c-api.md](../c-api.md#guided-mapping-a-sites-layers).
 
+## On the phone
+
+The whole site pipeline runs on a phone. Measured on a Pixel 10a
+(2026-11-20) with `vg_replay` and `vg_site` built for Android (README,
+"Building"), on yard-guided's five walks of 1.5-2.5 minutes each, replaying
+each walk then adding it to the site, oldest first, as the app would after
+each step of a run:
+
+| Walk | Replay (phone / PC) | Add to the site (phone / PC) |
+| --- | --- | --- |
+| boundary1 | 10.1 / 4.1 s | 0.7 / 0.9 s |
+| fill1 | 11.6 / 4.4 s | 1.2 / 1.3 s |
+| fill2 | 8.9 / 3.2 s | 2.1 / 2.0 s |
+| boundary2 | 8.4 / 3.2 s | 2.8 / 2.8 s |
+| fill3 | 9.2 / 3.2 s | 2.4 / 2.8 s |
+
+So about 10-14 s after each step on the phone (2-3 times the PC for a
+replay; adding is as fast), growing slowly with the site's size. The
+phone's site matched the PC's: the same placements and fits, the same
+ground layer, states, features and guidance cell for cell, and the same
+boundary (once ties in its running median were broken the same way on every
+standard library); the surface maps differ by about 1e-6 m in a few dozen
+cells.
+
 ## What sites don't do yet
 
 - Sun maps over the site's combined maps and canopy.
