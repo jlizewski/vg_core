@@ -17,19 +17,23 @@ Things only you can do, most pressing first.
       frames because the app left the screen for ~7 s between them (logcat
       18:43:24-31: UI hidden, then background), which restarts the AR
       session; the frame logic itself is right.
-- [ ] **Push vg_core's `stage2/c-api-site-layers` first, then vg_flutter's
+- [ ] **Push vg_core's `stage2/live-guidance` first, then vg_flutter's
       `app/recorder-parity`**: vg_flutter's submodule points at vg_core
-      `26bd64d`, which is only on your machine until you push. (vg_core's
-      branch has 2.1-2.3, the Foxglove fix, the PowerShell README and this
-      TODO.)
+      `9b307c8`, only on your machine until you push. (vg_core's branch has
+      everything since main: 2.1-2.4, the Foxglove fix, the PowerShell
+      README and this TODO.)
 - [ ] **Next daylight test, on the phone** (`flutter run` from
-      `app/recorder-parity`): a boundary walk, then a ground fill, screen on,
-      app in front the whole time. After each stops, the status line should
-      say "Adding it to the site "garden"…" and, 10-20 s later, "Added to
-      the site in N s: … holes (… m²) to look at …; boundary set." Then
-      `adb pull /sdcard/Android/data/com.victorygarden.vg_flutter/files/sites`
-      and `python -m vg_tools.cli mcap stats <file>` on both recordings: one
-      tracking frame for both. Send me the pulled `sites` folder's path.
+      `app/recorder-parity`), screen on, app in front the whole time:
+  1. **Boundary walk** round the yard. When it stops, wait for the status
+     line's "Added to the site in N s: … holes (… m²) to look at" (10-20 s).
+  2. **Ground fill**, without leaving the recorder. The status line should
+     say "Live guidance: the holes of the site "garden" close as you see
+     them", and a panel over the camera shows the holes left, an arrow and
+     distance to the next spot, and each hole's progress. Follow the arrow:
+     a hole should fill up within seconds of looking at it.
+  3. Afterwards: `adb pull /sdcard/Android/data/com.victorygarden.vg_flutter/files/sites`
+     and the two recordings, and send me the paths (I'll compare what live
+     guidance said with what adding the fill did, as for the yard).
 - [ ] **vg_flutter: commit your README quick start** (uncommitted). The
       README is saved as UTF-16, so git shows it as binary and won't diff it;
       re-save it as UTF-8. It also still says the app remembers recording
@@ -59,8 +63,8 @@ Things only you can do, most pressing first.
 | 2.2 | C API for a site's layers (ground grids, boundary, features, guidance, edits) and their jobs; `vg site delete-edit` | ✅ `eb1e196` | The dashboard's layer views could be rebuilt from it (a ctypes test does) |
 | — | vg_flutter recorder parity (agent), the JNI crash fix, keep the screen on while recording | ✅ `fd02a47`..`7beef6e`; shared frame to re-check outdoors | The phone test passes |
 | 2.3 | The site pipeline on the phone after each step: `vg_session_*` in the C API; vg_core's apps built for Android and timed on the Pixel 10a (8-12 s replay + 1-3 s add per step; same layers as the PC once a boundary tie-break was made portable); the app adds each guided step to a site and reports it | ✅ vg_core `8620b22`, `26bd64d`; vg_flutter `27dd2fa`; ⏳ the app flow on the phone (next daylight test) | After a boundary walk and a ground fill, the phone shows the same layers as the PC, in acceptable time |
-| 2.4 | **Next.** Live guidance during a ground fill: the walk's ground merged with the site's as you walk | | Walking to a guidance spot visibly closes that hole within seconds |
-| 2.5 | Flutter screens for a guided run: boundary walk (loop closed), ground fill with holes and spots on a map, done check, edits on the phone | waits on your design notes | You can map the yard's ground on the phone without the PC |
+| 2.4 | Live guidance during a ground fill: holes closing as the live map sees them, the next spot and which way to turn (`LiveGuidance`, `vg_live_guidance_*`, `vg live guidance`); on the phone, natively on the recorded frames, with a panel over the camera | ✅ vg_core `808b797`, `9b307c8`; vg_flutter `3339c1a`; ⏳ the daylight test | Walking to a guidance spot visibly closes that hole within seconds |
+| 2.5 | **Next.** Flutter screens for a guided run: boundary walk (loop closed), ground fill with holes and spots on a map, done check, edits on the phone | waits on your design notes | You can map the yard's ground on the phone without the PC |
 | 2.6 | Confirmation overlay: ground states over the camera view | | You can confirm what the phone thinks is ground by looking |
 | 2.7 | Wrap-up: docs; D14 for the ground steps and D17 within a run | | Docs match the code |
 
@@ -84,6 +88,13 @@ Small things noticed along the way, not yet scheduled.
   pause/resume handling. If it does, the app could keep the tracking frame
   over brief pauses instead of always making a new one; needs a test
   (record, pause a few seconds, record the same spot, compare poses).
+- Live guidance is cautious: on the yard it ended with 10.1 m² unseen where
+  adding the fill left 8.1 m² (it misses some cells the full pipeline
+  resolves from every frame, not just keyframes). Fine for guidance; could
+  be tuned with phone data.
+- Live guidance can't start for a ground fill until the boundary walk (or
+  another walk of the run) has been added to the site; the app doesn't wait
+  for it yet.
 - vg_flutter: no screen to name or switch the site yet (Settings has
   `siteName`, default "garden"); part of 2.5.
 - The release build is rebuilt by the first `vg` app run after C++ changes
