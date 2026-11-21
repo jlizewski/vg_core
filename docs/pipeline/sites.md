@@ -258,6 +258,37 @@ sightings), 3 lines within 17 cm, 4 blocks within 13 cm.
 On the yard after its guided walks: 3 holes (8.1 m²), 4 spots, each hole
 98-100% in view from its spots.
 
+## Live guidance
+
+While a ground fill is being walked, the holes close as the phone sees them
+([live_guidance.hpp](../../include/vg_core/live_guidance.hpp)): a walk
+recorded in the same tracking session as one of the site's walks is in the
+site frame already (D17), so its live map (keyframes fused as it walks) is
+read against the site's holes as it grows. A hole cell is seen when the live
+map has a surface there no more than 2 m over the hole's expected ground (a
+plane through the measured ground around it); a canopy higher up doesn't
+count. A hole is done when 90% of it is seen. Next is the nearest spot of a
+hole not yet done, with its distance and which way to turn.
+
+The live map must keep the stages' minimum voxel weight (0.05 for depth with
+confidence, as ARCore's), or faint far readings count as seeing holes.
+Checked on the yard: a site of its first four walks (5 holes, 18.7 m²), with
+its last ground fill played through live guidance (`vg live guidance`), then
+added to the site as usual, cell by cell:
+
+| Live map | Live: unseen at the end | Seen live, still unknown once added | Unseen live, resolved once added | Agree |
+| --- | --- | --- | --- | --- |
+| no minimum weight | 0.3 m² | 335 of 807 cells | 0 | 58% |
+| minimum weight 0.05 | 10.1 m² (added: 8.1 m²) | 13 | 100 | 86% |
+
+So live guidance errs the safe way: it rarely says a hole is seen that the
+walk didn't really see, and adding the walk after the step settles the rest.
+
+```sh
+vg live guidance garden-site rec.vgcap.mcap     # a ground fill played as the phone would
+vg live guidance garden-site rec.vgcap.mcap --every 1 --cells-out cells.csv
+```
+
 ## Edits
 
 The user's corrections win over what walks measure (D16). Each is a line in

@@ -500,6 +500,7 @@ vg site ground garden-site                     # the ground layer: every walk co
                                                # features; the boundary from boundary walks
 vg site edit garden-site boundary "x y;x y" gate  # a correction (also ground / not_ground areas)
 vg site delete-edit garden-site edit-1         # take a correction back
+vg live guidance garden-site rec.vgcap.mcap    # a ground fill's holes closing as the phone would see them
 ```
 
 - The first walk added sets the site's frame. Each later one is registered

@@ -8,27 +8,13 @@
 namespace vg {
 namespace {
 
-struct Cell {
-  int x = 0;
-  int y = 0;
-};
+using Cell = HoleCell;
 
 }  // namespace
 
-Guidance plan_guidance(const GroundLayer& ground, const Eigen::Vector2d& start,
-                       const GuidanceConfig& config) {
-  Guidance guidance;
+std::vector<std::vector<HoleCell>> find_holes(const GroundLayer& ground) {
   const HeightMap& map = ground.heights;
-  if (map.width == 0 || map.height == 0) {
-    return guidance;
-  }
-  const double cell = map.cell_size;
   const auto state = [&](int x, int y) { return ground.state[ground.index(x, y)]; };
-  const auto center = [&](int x, int y) {
-    return Eigen::Vector2d(map.origin + Eigen::Vector2d(x + 0.5, y + 0.5) * cell);
-  };
-
-  // The holes: 4-connected regions of unknown cells.
   std::vector<std::vector<Cell>> holes;
   std::vector<char> visited(ground.state.size(), 0);
   const std::array<std::array<int, 2>, 4> steps = {{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}};
@@ -55,6 +41,24 @@ Guidance plan_guidance(const GroundLayer& ground, const Eigen::Vector2d& start,
   }
   std::stable_sort(holes.begin(), holes.end(),
                    [](const auto& a, const auto& b) { return a.size() > b.size(); });
+  return holes;
+}
+
+Guidance plan_guidance(const GroundLayer& ground, const Eigen::Vector2d& start,
+                       const GuidanceConfig& config) {
+  Guidance guidance;
+  const HeightMap& map = ground.heights;
+  if (map.width == 0 || map.height == 0) {
+    return guidance;
+  }
+  const double cell = map.cell_size;
+  const auto state = [&](int x, int y) { return ground.state[ground.index(x, y)]; };
+  const auto center = [&](int x, int y) {
+    return Eigen::Vector2d(map.origin + Eigen::Vector2d(x + 0.5, y + 0.5) * cell);
+  };
+
+  // The holes: 4-connected regions of unknown cells, largest first.
+  const std::vector<std::vector<Cell>> holes = find_holes(ground);
 
   // Whether the straight line from a to b crosses a covered cell (not counting
   // its ends).

@@ -28,6 +28,7 @@ add_executable(vg_core_tests
   height_map_io_test.cpp
   map_builder_test.cpp
   label_consistency_test.cpp
+  live_guidance_test.cpp
   map_package_test.cpp
   pose_jumps_test.cpp
   registration_test.cpp

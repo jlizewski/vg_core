@@ -102,6 +102,8 @@ void record_walk(const std::filesystem::path& file, int frames) {
   vg_session_info info{};
   info.producer = "vg_core tests";
   info.platform = "synthetic";
+  info.session_type = VG_SESSION_GROUND_FILL;
+  info.tracking_frame = "c-api-test-frame";
   vg_recorder* recorder = nullptr;
   ASSERT_EQ(vg_recorder_open(utf8(file).c_str(), &info, &recorder), VG_OK) << vg_last_error();
   const vg_intrinsics k = to_c(vg::test::test_intrinsics());
@@ -608,4 +610,38 @@ TEST(CApi, RunsThePipelineFromARecording) {
   ASSERT_EQ(vg_site_layers_get_info(layers, &info), VG_OK);
   EXPECT_EQ(info.edit_count, 0u);
   vg_site_layers_free(layers);
+
+  // Live guidance for a walk still running in the site's tracking session.
+  vg_live_guidance* live = nullptr;
+  EXPECT_EQ(vg_live_guidance_open(site_dir.c_str(), "another-session", &live), VG_ERROR_FAILED);
+  EXPECT_NE(std::string(vg_last_error()).find("tracking frame"), std::string::npos);
+  ASSERT_EQ(vg_live_guidance_open(site_dir.c_str(), "c-api-test-frame", &live), VG_OK)
+      << vg_last_error();
+  const vg_live_target* live_targets = nullptr;
+  std::size_t live_count = 0;
+  ASSERT_EQ(vg_live_guidance_targets(live, &live_targets, &live_count), VG_OK);
+  EXPECT_EQ(live_count, info.target_count);
+  vg_live_guidance_state live_state{};
+  ASSERT_EQ(vg_live_guidance_get_state(live, &live_state), VG_OK);
+  EXPECT_EQ(live_state.has_position, 0);
+  EXPECT_EQ(live_state.done, live_count == 0 ? 1 : 0);
+  // Every hole cell's ground (about 0 m here) seen: the ground is done.
+  std::vector<vg_height_cell> seen_ground;
+  for (int y = -100; y < 100; ++y) {
+    for (int x = -100; x < 100; ++x) {
+      seen_ground.push_back({x, y, 0.0f});
+    }
+  }
+  ASSERT_EQ(vg_live_guidance_update(live, seen_ground.data(), seen_ground.size(), 0.05), VG_OK)
+      << vg_last_error();
+  EXPECT_EQ(vg_live_guidance_update(live, seen_ground.data(), seen_ground.size(), 0.0),
+            VG_ERROR_INVALID_ARGUMENT);
+  const vg_pose camera = to_c(walk(8)[1]);
+  ASSERT_EQ(vg_live_guidance_set_camera_pose(live, &camera), VG_OK);
+  ASSERT_EQ(vg_live_guidance_get_state(live, &live_state), VG_OK);
+  EXPECT_EQ(live_state.has_position, 1);
+  EXPECT_EQ(live_state.done, 1);
+  EXPECT_EQ(live_state.has_next, 0);
+  EXPECT_DOUBLE_EQ(live_state.unseen_area, 0.0);
+  vg_live_guidance_free(live);
 }

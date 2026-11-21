@@ -74,4 +74,14 @@ struct Guidance {
 Guidance plan_guidance(const GroundLayer& ground, const Eigen::Vector2d& start = {0.0, 0.0},
                        const GuidanceConfig& config = {});
 
+// A cell of the ground layer's grid.
+struct HoleCell {
+  int x = 0;
+  int y = 0;
+};
+
+// The holes plan_guidance targets: 4-connected regions of Unknown cells,
+// largest first (hole k is GuidanceTarget rank k + 1).
+std::vector<std::vector<HoleCell>> find_holes(const GroundLayer& ground);
+
 }  // namespace vg

@@ -56,6 +56,7 @@ add_library(vg_core
   src/height_map.cpp
   src/height_map_io.cpp
   src/label_consistency.cpp
+  src/live_guidance.cpp
   src/live_height_map.cpp
   src/map_builder.cpp
   src/map_package.cpp
@@ -144,6 +145,7 @@ if(VG_CORE_BUILD_IO)
   if(VG_CORE_BUILD_C)
     set(_vg_core_c_sources
       src/c_api/layers.cpp
+      src/c_api/live_guidance.cpp
       src/c_api/library.cpp
       src/c_api/map_builder.cpp
       src/c_api/maps.cpp

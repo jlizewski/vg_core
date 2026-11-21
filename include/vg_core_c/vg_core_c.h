@@ -551,6 +551,63 @@ VG_API vg_status vg_site_layers_guidance(const vg_site_layers* layers,
 VG_API vg_status vg_site_layers_edits(const vg_site_layers* layers, const vg_site_edit** edits,
                                       size_t* count);
 
+/* ===== Live guidance (include/vg_core/live_guidance.hpp) =============== */
+
+/* Ground-fill guidance while walking: the site's holes closing as the live
+ * map (vg_map_builder) sees them, and where to go next. For a walk recorded
+ * in the same tracking session as one of the site's walks (the same
+ * vg_session_info.tracking_frame), which places it in the site. Give the
+ * live map the stages' minimum voxel weight
+ * (vg_map_builder_set_min_weight(builder, 0.05) for depth with confidence,
+ * as ARCore's), or faint far readings count as seeing holes. Since API
+ * version 2. */
+typedef struct vg_live_guidance vg_live_guidance;
+
+typedef struct vg_live_target {
+  int32_t rank;  /* 1 = largest, as in vg_site_layers_guidance */
+  int32_t order; /* the planned visiting order */
+  double area;   /* m^2 */
+  double center_x, center_y;
+  size_t cells;
+  size_t seen_cells;
+  double seen;  /* share seen while walking, 0-1 */
+  int32_t done; /* seen enough */
+} vg_live_target;
+
+typedef struct vg_live_guidance_state {
+  int32_t done;         /* every hole done */
+  double unseen_area;   /* m^2 of the holes not yet seen */
+  int32_t has_position; /* once a camera pose is set */
+  double x, y;          /* the camera, site frame */
+  /* Where to go next: the nearest spot of a hole not yet done. */
+  int32_t has_next;
+  int32_t next_rank;
+  double next_x, next_y;
+  double next_heading;  /* which way to face there, radians from x */
+  double next_distance; /* m */
+  double next_turn;     /* radians to turn to walk toward it, + left, (-pi, pi] */
+} vg_live_guidance_state;
+
+/* For the site in site_dir (its layers as last made) and the tracking frame
+ * of the walk being recorded. VG_ERROR_FAILED, saying why, when the site has
+ * no ground layer or no walk in that tracking frame. */
+VG_API vg_status vg_live_guidance_open(const char* site_dir, const char* tracking_frame,
+                                       vg_live_guidance** out);
+VG_API void vg_live_guidance_free(vg_live_guidance* live);
+/* The live height map's changed cells (vg_map_update.cells), with its cell
+ * size (vg_map_builder_config.height_cell_size). */
+VG_API vg_status vg_live_guidance_update(vg_live_guidance* live, const vg_height_cell* cells,
+                                         size_t count, double cell_size);
+/* The camera's pose in the walk's world frame, optical frame (z forward):
+ * world_from_body times body_from_camera. */
+VG_API vg_status vg_live_guidance_set_camera_pose(vg_live_guidance* live,
+                                                  const vg_pose* world_from_camera);
+VG_API vg_status vg_live_guidance_get_state(const vg_live_guidance* live,
+                                            vg_live_guidance_state* out);
+/* The holes by rank; owned by the handle until the next call of this. */
+VG_API vg_status vg_live_guidance_targets(vg_live_guidance* live, const vg_live_target** targets,
+                                          size_t* count);
+
 /* ===== Pipeline jobs (include/vg_core/config/jobs.hpp) ================= */
 
 /* Each job takes settings as command-line arguments, applied in order over

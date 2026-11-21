@@ -1125,4 +1125,16 @@ FeatureLayer Site::make_feature_layer(std::ostream& log, const FeatureConfig& co
   return layer;
 }
 
+std::optional<MapTransform> Site::placement_of_tracking_frame(const std::string& frame) const {
+  if (frame.empty()) {
+    return std::nullopt;
+  }
+  for (auto v = visits_.rbegin(); v != visits_.rend(); ++v) {
+    if (manifest_string(package_dir(*v), "tracking_frame") == frame) {
+      return v->site_from_map;
+    }
+  }
+  return std::nullopt;
+}
+
 }  // namespace vg

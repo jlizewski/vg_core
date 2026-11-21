@@ -126,6 +126,12 @@ class Site {
   // The package directory of a visit, resolved against the site.
   std::filesystem::path package_dir(const SiteVisit& visit) const;
 
+  // Where the tracking frame (a recording's session info tracking_frame)
+  // sits in the site: the placement of the latest visit recorded in it, so a
+  // walk still running in that tracking session is in the site frame too
+  // (D17). nullopt if no visit has it (or frame is empty).
+  std::optional<MapTransform> placement_of_tracking_frame(const std::string& frame) const;
+
  private:
   void save() const;
   // The site's boundary from its boundary walks, applied to ground (cells

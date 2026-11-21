@@ -18,6 +18,7 @@ over the C++ library. Decision: [D11](decisions.md#d11-a-c-api-for-the-app-bindi
 | Packages | `vg_package_*` | The 3D voxel view, where a walk is on the Earth |
 | Sites | `vg_site_*` | Listing a site's walks and how they lined up |
 | Site layers | `vg_site_layers_*` | The ground's states and grids, the boundary, feature elements, ground-fill guidance and the user's edits with their reviews: what guided mapping shows over the site |
+| Live guidance | `vg_live_guidance_*` | Holes closing as the phone sees them during a ground fill, and where to go next |
 | Pipeline jobs | `vg_replay`, `vg_map_stages`, `vg_site_add`, `vg_site_make_maps`, `vg_site_make_ground`, `vg_site_add_edit`, `vg_site_delete_edit` | Building maps after a walk; re-tuning them; correcting a site's layers |
 
 The jobs are the same code the command-line apps run: `vg replay`, `vg map`
@@ -71,7 +72,8 @@ whenever a declaration changes in a way that breaks existing callers.
 Version 2 (2026-11-19) added `session_type` and `tracking_frame` to
 `vg_session_info` (a layout change) and `vg_recorder_write_magnetometer`,
 then the site layers (`vg_site_layers_*`) and their jobs, and reading a
-recording's session info (`vg_session_*`).
+recording's session info (`vg_session_*`), and live guidance
+(`vg_live_guidance_*`).
 
 ## Examples
 
@@ -243,6 +245,7 @@ cmake --build --preset debug --target vg_core_c
 | [src/c_api/library.cpp](../src/c_api/library.cpp) | Version, errors, conversions |
 | [src/c_api/recorder.cpp](../src/c_api/recorder.cpp) | `vg_recorder_*` over `io::SessionWriter` |
 | [src/c_api/session.cpp](../src/c_api/session.cpp) | `vg_session_*` over `io::SessionReader` |
+| [src/c_api/live_guidance.cpp](../src/c_api/live_guidance.cpp) | `vg_live_guidance_*` over `LiveGuidance` |
 | [src/c_api/map_builder.cpp](../src/c_api/map_builder.cpp) | `vg_map_builder_*` over `MapBuilder` and `PoseJumpFilter` |
 | [src/c_api/maps.cpp](../src/c_api/maps.cpp) | Grids, packages, sites |
 | [src/c_api/layers.cpp](../src/c_api/layers.cpp) | `vg_site_layers_*` over `load_site_layers`, and the layers' jobs |

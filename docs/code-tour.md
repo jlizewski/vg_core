@@ -89,6 +89,7 @@ See [pipeline/sites.md](pipeline/sites.md).
 | [boundary.hpp](../include/vg_core/boundary.hpp) | The site's boundary from a boundary walk: the loop and its drift, pushed out to the edge; boundary edits. |
 | [features.hpp](../include/vg_core/features.hpp) | Feature elements (posts, lines, blocks) from each walk, matched across walks and retired when missed. |
 | [guidance.hpp](../include/vg_core/guidance.hpp) | `plan_guidance`: the unknown holes in the ground, where to stand to see each, and when the ground is done. |
+| [live_guidance.hpp](../include/vg_core/live_guidance.hpp) | `LiveGuidance`: the site's holes closing as a walk's live map sees them, and the next spot to go to. |
 | [site_layers.hpp](../include/vg_core/site_layers.hpp) | `load_site_layers`: a site's layers read back from disk (boundary, features, guidance, edits and reviews), for the apps. |
 | [surface_mesh.hpp](../include/vg_core/surface_mesh.hpp) | Grids as triangle meshes, written as glTF (`model.glb`). |
 
