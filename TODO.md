@@ -17,20 +17,23 @@ Things only you can do, most pressing first.
       frames because the app left the screen for ~7 s between them (logcat
       18:43:24-31: UI hidden, then background), which restarts the AR
       session; the frame logic itself is right.
-- [ ] **Repeat one step of the phone test**: boundary walk, then ground fill
-      with the screen kept on and the app in front the whole time (after the
-      keep-screen-on fix below, if you want it). Expect one tracking frame
-      for both: `python -m vg_tools.cli mcap stats <file>` on each.
-- [ ] **vg_flutter: commit the JNI fix in your working tree**
-      (`recorder_jni.cpp`: release the string before deleting its
-      reference). It's the cause of the 16:59 and 17:10 crashes in
-      `nativeWriteStaticTransforms`; none since.
-- [ ] **Push and merge vg_core's `stage2/c-api-site-layers`** (2.1, 2.2, the
-      Foxglove fix, the PowerShell README, this TODO; it holds
-      `stage2/c-api-capture-0.2`).
-- [ ] **vg_flutter: commit your README quick start** (uncommitted on
-      `app/recorder-parity`), then push the branch. The README is saved as
-      UTF-16, so git shows it as binary and won't diff it; re-save it as UTF-8.
+- [ ] **Push vg_core's `stage2/c-api-site-layers` first, then vg_flutter's
+      `app/recorder-parity`**: vg_flutter's submodule points at vg_core
+      `26bd64d`, which is only on your machine until you push. (vg_core's
+      branch has 2.1-2.3, the Foxglove fix, the PowerShell README and this
+      TODO.)
+- [ ] **Next daylight test, on the phone** (`flutter run` from
+      `app/recorder-parity`): a boundary walk, then a ground fill, screen on,
+      app in front the whole time. After each stops, the status line should
+      say "Adding it to the site "garden"…" and, 10-20 s later, "Added to
+      the site in N s: … holes (… m²) to look at …; boundary set." Then
+      `adb pull /sdcard/Android/data/com.victorygarden.vg_flutter/files/sites`
+      and `python -m vg_tools.cli mcap stats <file>` on both recordings: one
+      tracking frame for both. Send me the pulled `sites` folder's path.
+- [ ] **vg_flutter: commit your README quick start** (uncommitted). The
+      README is saved as UTF-16, so git shows it as binary and won't diff it;
+      re-save it as UTF-8. It also still says the app remembers recording
+      types because the C API can't read them: it can now (`vg_session_*`).
 - [ ] *Note:* the 11-18 recordings moved to `vg_sites/recordings_11182026`;
       for yard-guided's Foxglove buttons start the dashboard with
       `--recordings ..\vg_sites\recordings_11182026`.
@@ -54,10 +57,9 @@ Things only you can do, most pressing first.
 | --- | --- | --- | --- |
 | 2.1 | C API recorder: session type, tracking frame, magnetometer (format 0.2) | ✅ `2ac146f` | The Flutter plugin records guided steps through the C API |
 | 2.2 | C API for a site's layers (ground grids, boundary, features, guidance, edits) and their jobs; `vg site delete-edit` | ✅ `eb1e196` | The dashboard's layer views could be rebuilt from it (a ctypes test does) |
-| — | vg_flutter recorder parity (agent) | ✅ records on the phone; shared frame to re-check | The phone test above passes |
-| — | vg_flutter: keep the screen on while the recorder is open, so a screen timeout between steps doesn't end the run's tracking frame (neither app does today) | proposed | Steps of a run share a frame without touching the phone between them |
-| 2.3 | **Next.** The site pipeline on the phone after each step (add the walk, remake the layers), timed; plus `vg_session_open` / `vg_session_info` / `vg_session_free` in the C API so the app can read any recording's session type | ready to start | After a boundary walk and a ground fill, the phone shows the same layers as the PC, in acceptable time |
-| 2.4 | Live guidance during a ground fill: the walk's ground merged with the site's as you walk | | Walking to a guidance spot visibly closes that hole within seconds |
+| — | vg_flutter recorder parity (agent), the JNI crash fix, keep the screen on while recording | ✅ `fd02a47`..`7beef6e`; shared frame to re-check outdoors | The phone test passes |
+| 2.3 | The site pipeline on the phone after each step: `vg_session_*` in the C API; vg_core's apps built for Android and timed on the Pixel 10a (8-12 s replay + 1-3 s add per step; same layers as the PC once a boundary tie-break was made portable); the app adds each guided step to a site and reports it | ✅ vg_core `8620b22`, `26bd64d`; vg_flutter `27dd2fa`; ⏳ the app flow on the phone (next daylight test) | After a boundary walk and a ground fill, the phone shows the same layers as the PC, in acceptable time |
+| 2.4 | **Next.** Live guidance during a ground fill: the walk's ground merged with the site's as you walk | | Walking to a guidance spot visibly closes that hole within seconds |
 | 2.5 | Flutter screens for a guided run: boundary walk (loop closed), ground fill with holes and spots on a map, done check, edits on the phone | waits on your design notes | You can map the yard's ground on the phone without the PC |
 | 2.6 | Confirmation overlay: ground states over the camera view | | You can confirm what the phone thinks is ground by looking |
 | 2.7 | Wrap-up: docs; D14 for the ground steps and D17 within a run | | Docs match the code |
@@ -82,6 +84,8 @@ Small things noticed along the way, not yet scheduled.
   pause/resume handling. If it does, the app could keep the tracking frame
   over brief pauses instead of always making a new one; needs a test
   (record, pause a few seconds, record the same spot, compare poses).
+- vg_flutter: no screen to name or switch the site yet (Settings has
+  `siteName`, default "garden"); part of 2.5.
 - The release build is rebuilt by the first `vg` app run after C++ changes
   (several minutes after a big change); the dashboard's first job shows it.
 
